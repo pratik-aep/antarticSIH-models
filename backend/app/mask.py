@@ -110,3 +110,54 @@ class LandMask:
                         best = (lat2, lon2)
                 return best
         return None
+
+    def carve_water(self, polyline_latlon):
+        """Force a water corridor along a polyline of (lat, lon) points.
+
+        Narrow real-water straits/canals are thinner than a single grid cell, so
+        the centre-point land test erases them and splits one sea into two
+        disconnected graph components ("enclosed sea" failures). This re-opens a
+        belt of cells along the given corridor — the same named chokepoints used
+        for crossing detection — restoring connectivity at the coarse resolution.
+
+        Cells inside the belt are only converted to water when they are (chain-)
+        adjacent to existing water, so a corridor floating over solid land is
+        a no-op rather than a tunnel through a landmass.
+        """
+        if not polyline_latlon:
+            return
+        belt = set()
+        for (la1, lo1), (la2, lo2) in zip(polyline_latlon, polyline_latlon[1:]):
+            sub = geo.sample_geodesic(la1, lo1, la2, lo2, step_nm=SPACING * 60.0)
+            for la, lo in sub:
+                r = round((LAT_TOP - la) / SPACING)
+                c = round((lo - LON_LEFT) / SPACING) % NCOLS
+                if 0 <= r < NROWS:
+                    belt.add((r, c))
+        wide = set()
+        for r, c in belt:
+            for dr in (-1, 0, 1):
+                rr = r + dr
+                if rr < 0 or rr >= NROWS:
+                    continue
+                for dc in (-1, 0, 1):
+                    wide.add((rr, (c + dc) % NCOLS))
+        changed = True
+        while changed:
+            changed = False
+            for r, c in wide:
+                i = r * NCOLS + c
+                if self.land[i] == 0:
+                    continue
+                if self._touches_water(r, c):
+                    self.land[i] = 0
+                    changed = True
+
+    def _touches_water(self, r: int, c: int) -> bool:
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            rr = r + dr
+            if rr < 0 or rr >= NROWS:
+                continue
+            if self.land[rr * NCOLS + (c + dc) % NCOLS] == 0:
+                return True
+        return False

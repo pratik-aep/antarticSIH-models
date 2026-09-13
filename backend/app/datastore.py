@@ -15,6 +15,7 @@ DATA = os.path.abspath(os.path.join(HERE, "..", "data"))
 PORTS_FILE = os.path.join(DATA, "ports.json")
 ECAS_FILE = os.path.join(DATA, "ecas.json")
 CHOKEPOINTS_FILE = os.path.join(DATA, "chokepoints.json")
+WATERWAYS_FILE = os.path.join(DATA, "waterways.json")
 
 
 class Datastore:
@@ -52,6 +53,18 @@ class Datastore:
             }
             for c in cp_data
         ]
+
+        with open(WATERWAYS_FILE) as f:
+            ww_data = json.load(f)["waterways"]
+        self.waterways = []
+        for w in ww_data:
+            via = [tuple(p) for p in w.get("via", [])]
+            self.waterways.append({
+                "name": w["name"],
+                "from": tuple(w["from"]),
+                "to": tuple(w["to"]),
+                "via": via,
+            })
 
     # ------------------------------------------------------------- port search
     def search_ports(self, q: str, limit: int = 12) -> list[dict]:
@@ -117,8 +130,7 @@ class Datastore:
                 pt = cp["point"]
                 geometry = {"type": "Point", "coordinates": [pt[0], pt[1]]}
             else:
-                seg = cp["line"]
-                geometry = {"type": "LineString", "coordinates": [list(seg[0]), list(seg[1])]}
+                geometry = {"type": "LineString", "coordinates": [list(pt) for pt in cp["line"]]}
             features.append({
                 "type": "Feature",
                 "properties": {"name": cp["name"], "kind": cp["kind"], "radiusNm": cp.get("radiusNm", 0)},

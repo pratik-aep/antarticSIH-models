@@ -26,10 +26,37 @@ A_STAR = True
 STRAIT_TOL_DEG = 0.4
 
 
-class GridRouter:
-    """A* shortest path over the water cells of the LandMask grid."""
+def build_waterway_midline(w, step_nm=6.0):
+    """Dense polyline along the full canal+gulf path of an artificial waterway.
 
-    def __init__(self, mask: LandMask):
+    `w` is a waterway dict with `from`/`to` (open-water connect points) and
+    `via` (intermediate real-canal waypoints). The same polyline is used for
+    three purposes: A* edge cost, the rendered/spliced route geometry, and the
+    mask carving that keeps it water at coarse resolution.
+    """
+    chain = [tuple(w["from"])] + [tuple(p) for p in w.get("via", [])] + [tuple(w["to"])]
+    out = []
+    for p, q in zip(chain, chain[1:]):
+        sub = geo.sample_geodesic(p[0], p[1], q[0], q[1], step_nm)
+        for x in sub:
+            if not out or x != out[-1]:
+                out.append(x)
+        if not out:
+            out.append(p)
+    return out
+
+
+class GridRouter:
+    """A* shortest path over the water cells of the LandMask grid.
+
+    Artificial waterways (Suez / Panama / Kiel) are added as shortcut edges
+    between two snap-to-water cells, costed at their real canal
+    length (in metres, matching the metre-valued grid edges). When the search
+    uses such an edge, the canonical canal midline is spliced into the returned
+    polyline so rendering, crossing detection and ECA all see the canal line.
+    """
+
+    def __init__(self, mask: LandMask, waterways=()):
         self.mask = mask
         self.lats = [LAT_TOP - r * SPACING for r in range(NROWS)]
         self.lons = [LON_LEFT + c * SPACING for c in range(NCOLS)]
@@ -44,6 +71,34 @@ class GridRouter:
         # the Southern Ocean is a legitimate routing space for Antarctic legs.
         self.arctic_pen_lat = 65.0
         self.arctic_penalty_per_nm = 0.2
+        self._build_waterways(waterways)
+
+    def _build_waterways(self, waterways):
+        self.waterways = {}       # node index -> [(neighbour node, cost m, name)]
+        self.waterway_lines = {}  # (nodeA, nodeB) -> [(lat, lon)...] canal midline
+        for w in waterways:
+            midline = build_waterway_midline(w)
+            if len(midline) < 2:
+                print(f"[route] waterway '{w['name']}' has no midline — skipped", flush=True)
+                continue
+            sn_a = self.mask.nearest_water(w["from"][0], w["from"][1], max_radius=8)
+            sn_b = self.mask.nearest_water(w["to"][0], w["to"][1], max_radius=8)
+            if sn_a is None or sn_b is None:
+                print(f"[route] waterway '{w['name']}' endpoint not near navigable water — skipped", flush=True)
+                continue
+            nA = self.cell_index(sn_a[0], sn_a[1])
+            nB = self.cell_index(sn_b[0], sn_b[1])
+            iA = nA[0] * NCOLS + nA[1]
+            iB = nB[0] * NCOLS + nB[1]
+            if iA == iB:
+                print(f"[route] waterway '{w['name']}' endpoints share a cell — skipped", flush=True)
+                continue
+            cost_m = geo.polyline_length_nm(midline) * geo.NM_TO_M
+            self.waterways.setdefault(iA, []).append((iB, cost_m, w["name"]))
+            self.waterways.setdefault(iB, []).append((iA, cost_m, w["name"]))
+            self.waterway_lines[(iA, iB)] = midline
+            self.waterway_lines[(iB, iA)] = list(reversed(midline))
+            print(f"[route] waterway '{w['name']}' loaded ({cost_m / geo.NM_TO_M:.0f} nm)", flush=True)
 
     def cell_index(self, lat, lon):
         r = round((LAT_TOP - lat) / SPACING)
@@ -88,8 +143,13 @@ class GridRouter:
                     cur = came.get(cur)
                 path.reverse()
                 pts = []
-                for n in path:
+                for i, n in enumerate(path):
                     pts.append((self.lats[n // NCOLS], self.lons[n % NCOLS]))
+                    if i + 1 < len(path):
+                        nxt = path[i + 1]
+                        midline = self.waterway_lines.get((n, nxt))
+                        if midline:
+                            pts.extend(midline[1:-1])
                 return pts
             for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
                 rr = n_r + dr
@@ -102,6 +162,14 @@ class GridRouter:
                 nb = rr * NCOLS + cc
                 if self.mask.land[nb]:
                     continue
+                # No diagonal through a land corner: a diagonal hop from
+                # (n_r,n_c) to (rr,cc) passes through the shared corner of the
+                # four-cell block. If EITHER axis-adjacent cell is land, the
+                # geodesic between the two centres clips that land corner, so
+                # the route only turns the corner via the orthogonal cells.
+                if dr != 0 and dc != 0:
+                    if self.mask.land[n_r * NCOLS + cc] or self.mask.land[rr * NCOLS + n_c]:
+                        continue
                 edge = self._edge(n_r, n_c, rr, cc)
                 if lat_rr > self.arctic_pen_lat:
                     d = lat_rr - self.arctic_pen_lat
@@ -111,6 +179,19 @@ class GridRouter:
                     g[nb] = tentative
                     came[nb] = node
                     h = geo.haversine(self.lats[rr], (self.lons[cc] % 360.0) - 180.0, to_lat, to_lon)
+                    heapq.heappush(heap, (tentative + h, counter, nb))
+                    counter += 1
+            for nb, wcost, _wname in self.waterways.get(node, ()):
+                if self.mask.land[nb]:
+                    continue
+                tentative = g[node] + wcost
+                if tentative < g.get(nb, float("inf")):
+                    g[nb] = tentative
+                    came[nb] = node
+                    h = geo.haversine(
+                        self.lats[nb // NCOLS], (self.lons[nb % NCOLS] % 360.0) - 180.0,
+                        to_lat, to_lon,
+                    )
                     heapq.heappush(heap, (tentative + h, counter, nb))
                     counter += 1
             closed += 1
@@ -218,6 +299,49 @@ def _resample(pts, step_nm=20.0) -> list[tuple[float, float]]:
     return dense
 
 
+def _chaikin(pts, iterations=1) -> list[tuple[float, float]]:
+    """Corner-cutting curve smoothing (in lat/lon space).
+
+    For each segment P0→P1 the two new control points are
+        Q = P0 + 0.25*(P1-P0)   (near P0)
+        R = P0 + 0.75*(P1-P0)   (near P1)
+    Output order per segment is Q then R so the polyline always advances
+    forward; emitting R then Q creates zigzag oscillations that inflate
+    total distance by ~2.5×.
+    """
+    if len(pts) < 3:
+        return list(pts)
+    out = list(pts)
+    for _ in range(iterations):
+        if len(out) < 3:
+            break
+        nxt = []
+        for i in range(len(out) - 1):
+            la1, lo1 = out[i]
+            la2, lo2 = out[i + 1]
+            nxt.append((la1 + 0.25 * (la2 - la1), lo1 + 0.25 * (lo2 - lo1)))
+            nxt.append((la1 + 0.75 * (la2 - la1), lo1 + 0.75 * (lo2 - lo1)))
+        nxt.append(out[-1])
+        out = nxt
+    return out
+
+
+def _smooth_safe(pts, mask, fallback=None):
+    """Apply Chaikin corner-cutting, keeping only land-safe passes.
+
+    The smoothed curve must never enter a land cell (sampled denser than the
+    grid). Fall back to a lighter pass, then to the unsmoothed path, so a
+    land-crossing artificial curve is never returned.
+    """
+    two = _chaikin(pts, 2)
+    if _check_free(two, mask):
+        return two
+    one = _chaikin(pts, 1)
+    if _check_free(one, mask):
+        return one
+    return fallback if fallback is not None else pts
+
+
 class RouteError(Exception):
     pass
 
@@ -273,9 +397,9 @@ class WP:
 
 
 class RouteEngine:
-    def __init__(self, mask: LandMask, ecas: list, chokepoints: list):
+    def __init__(self, mask: LandMask, ecas: list, chokepoints: list, waterways=()):
         self.mask = mask
-        self.router = GridRouter(mask)
+        self.router = GridRouter(mask, waterways=waterways)
         self.ecas = ecas                      # list of (name, MultiPolygon)
         self.chokepoints = chokepoints        # list of (name, [[lon, lat], [lon, lat]])
 
@@ -294,6 +418,15 @@ class RouteEngine:
             raise RouteError(f"'{a.label}' is not reachable from navigable water")
         if sb is None:
             raise RouteError(f"'{b.label}' is not reachable from navigable water")
+        for label, p, s in ((a.label, a, sa), (b.label, b, sb)):
+            snap_nm = geo.geodesic_distance_nm(p.lat, p.lon, s[0], s[1])
+            if snap_nm > 30.0:
+                print(
+                    f"[route] large waypoint snap: '{label}' "
+                    f"({p.lat:.2f}, {p.lon:.2f}) -> water ({s[0]:.2f}, {s[1]:.2f}) "
+                    f"{snap_nm:.0f} nm",
+                    flush=True,
+                )
         try:
             centers = self.router.shortest_path(sa[0], sa[1], sb[0], sb[1])
         except ValueError as exc:
@@ -305,6 +438,7 @@ class RouteEngine:
             reduced = _douglas_peucker(interior, eps=1.1)
             reduced = _shortcut_water(reduced, self.mask)
             reduced = _ensure_safe(reduced, centers, self.mask)
+            reduced = _smooth_safe(reduced, self.mask)
             interior = _resample(reduced, 20.0)
         pts = [(a.lat, a.lon)] + list(interior) + [(b.lat, b.lon)]
         out = []

@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from .datastore import Datastore
 from .mask import LandMask
-from .route_engine import RouteEngine, RouteError
+from .route_engine import RouteEngine, RouteError, build_waterway_midline
 
 
 class Waypoint(BaseModel):
@@ -66,7 +66,16 @@ def _parse_departure(raw: str) -> datetime:
 async def lifespan(app: FastAPI):
     store = Datastore()
     mask = LandMask()
-    engine = RouteEngine(mask, store.ecas, store.chokepoints)
+    # The 0.5° land grid erases real narrow straits (Dardanelles, Palk …) and
+    # every artificial waterway, splitting otherwise-connected seas. Re-open a
+    # chain corridor along the same chokepoint / canal reference lines used for
+    # crossing detection so the graph and the render line stay connected.
+    for cp in store.chokepoints:
+        if cp["kind"] == "strait" and cp["line"]:
+            mask.carve_water([(lat, lon) for lon, lat in cp["line"]])
+    for w in store.waterways:
+        mask.carve_water(build_waterway_midline(w))
+    engine = RouteEngine(mask, store.ecas, store.chokepoints, waterways=store.waterways)
     app.state.datastore = store
     app.state.engine = engine
     app.state.booted = True
