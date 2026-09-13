@@ -182,15 +182,17 @@ body {
   background: #fbfdff;
 }
 
-.res-route-stops { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-bottom: 1px solid #eef2f7; }
-.res-stop { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+.res-route-stops { display: flex; flex-direction: column; padding: 10px 12px; border-bottom: 1px solid #eef2f7; }
+.res-stop { display: flex; align-items: stretch; gap: 8px; font-weight: 600; }
+.res-stop-badge { display: flex; flex-direction: column; align-items: center; flex: 0 0 18px; }
 .res-stop-num {
-  width: 17px; height: 17px; border-radius: 50%; background: var(--blue); color: #fff;
+  width: 18px; height: 18px; border-radius: 50%; background: var(--blue); color: #fff;
   font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
 }
 .res-stop.origin .res-stop-num { background: var(--blue); }
 .res-stop.dest .res-stop-num { background: #2e7d32; }
-.res-stop-line { width: 1.5px; height: 11px; background: #c3ccd6; margin-left: 8px; }
+.res-stop-line { width: 2px; flex: 1; min-height: 10px; background: #c3ccd6; margin: 2px 0; }
+.res-stop-name { display: flex; align-items: center; font-weight: 600; font-size: 13px; color: var(--ink); padding: 1px 0 4px; }
 
 .res-row {
   display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid #f2f5f9;

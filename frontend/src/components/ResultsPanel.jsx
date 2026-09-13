@@ -48,11 +48,13 @@ export default function ResultsPanel({ route, loading, error, waypoints }) {
 
       <div className="res-route-stops">
         {places.map((p, i) => (
-          <span key={i} className={`res-stop ${i === 0 ? 'origin' : i === places.length - 1 ? 'dest' : ''}`}>
-            {i > 0 && <span className="res-stop-line" />}
-            <span className="res-stop-num">{i + 1}</span>
-            {p}
-          </span>
+          <div key={i} className={`res-stop ${i === 0 ? 'origin' : i === places.length - 1 ? 'dest' : ''}`}>
+            <div className="res-stop-badge">
+              <span className="res-stop-num">{i + 1}</span>
+              {i < places.length - 1 && <span className="res-stop-line" />}
+            </div>
+            <span className="res-stop-name">{p}</span>
+          </div>
         ))}
       </div>
 
