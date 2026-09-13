@@ -116,7 +116,7 @@ class GridRouter:
             self.lats[r2], ((self.lons[c2] % 360.0) - 180.0),
         )
 
-    def shortest_path(self, from_lat, from_lon, to_lat, to_lon):
+    def shortest_path(self, from_lat, from_lon, to_lat, to_lon, vessel_type="cargo", ice_class="none"):
         r0, c0 = self.cell_index(from_lat, from_lon)
         rg, cg = self.cell_index(to_lat, to_lon)
         if (r0, c0) == (rg, cg):
@@ -125,6 +125,10 @@ class GridRouter:
         goal = rg * NCOLS + cg
         if self.mask.land[start] or self.mask.land[goal]:
             raise ValueError("no navigable water near a route endpoint")
+
+        is_polar = vessel_type.lower() == "icebreaker" or ice_class.lower() in ("pc1_pc7", "icebreaker")
+        nav_top = 88.0 if is_polar else self.nav_top_lat
+        arctic_pen = 0.02 if is_polar else self.arctic_penalty_per_nm
 
         g = {start: 0.0}
         came = {}
@@ -157,23 +161,18 @@ class GridRouter:
                 if rr < 0 or rr >= NROWS:
                     continue
                 lat_rr = self.lats[rr]
-                if lat_rr > self.nav_top_lat:
+                if lat_rr > nav_top:
                     continue
                 nb = rr * NCOLS + cc
                 if self.mask.land[nb]:
                     continue
-                # No diagonal through a land corner: a diagonal hop from
-                # (n_r,n_c) to (rr,cc) passes through the shared corner of the
-                # four-cell block. If EITHER axis-adjacent cell is land, the
-                # geodesic between the two centres clips that land corner, so
-                # the route only turns the corner via the orthogonal cells.
                 if dr != 0 and dc != 0:
                     if self.mask.land[n_r * NCOLS + cc] or self.mask.land[rr * NCOLS + n_c]:
                         continue
                 edge = self._edge(n_r, n_c, rr, cc)
                 if lat_rr > self.arctic_pen_lat:
                     d = lat_rr - self.arctic_pen_lat
-                    edge += self.arctic_penalty_per_nm * d * d * geo.NM_TO_M
+                    edge += arctic_pen * d * d * geo.NM_TO_M
                 tentative = g[node] + edge
                 if tentative < g.get(nb, float("inf")):
                     g[nb] = tentative
@@ -411,7 +410,7 @@ class RouteEngine:
         return pts
 
     # ------------------------------------------------------------------ Stage B
-    def _land_avoid_path(self, a, b):
+    def _land_avoid_path(self, a, b, vessel_type="cargo", ice_class="none"):
         sa = self.mask.nearest_water(a.lat, a.lon)
         sb = self.mask.nearest_water(b.lat, b.lon)
         if sa is None:
@@ -428,7 +427,7 @@ class RouteEngine:
                     flush=True,
                 )
         try:
-            centers = self.router.shortest_path(sa[0], sa[1], sb[0], sb[1])
+            centers = self.router.shortest_path(sa[0], sa[1], sb[0], sb[1], vessel_type=vessel_type, ice_class=ice_class)
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
         interior = centers[1:-1] if len(centers) > 1 else []
@@ -447,11 +446,11 @@ class RouteEngine:
                 out.append(p)
         return out
 
-    def _leg_path(self, a, b):
+    def _leg_path(self, a, b, vessel_type="cargo", ice_class="none"):
         gc = self._gc_path(a, b)
         if _check_free(gc, self.mask):
             return gc
-        return self._land_avoid_path(a, b)
+        return self._land_avoid_path(a, b, vessel_type=vessel_type, ice_class=ice_class)
 
     # --------------------------------------------------------- Stages C and D
     def _eca_distance(self, path, eca_polys) -> float:
@@ -491,11 +490,6 @@ class RouteEngine:
                 seg_line = sgeo.LineString(cp["line"])
                 inter = line.intersection(seg_line)
                 if inter.is_empty:
-                    # Coarse-grid tolerance: the 0.5° A* channel can thread
-                    # through a strait at an offset (up to ~a grid cell) from
-                    # the reference throat line below. Count a transit when the
-                    # route runs within one grid cell of the line, using the
-                    # strait's centre to place the crossing along the route.
                     if line.distance(seg_line) > STRAIT_TOL_DEG:
                         continue
                     param = line.project(seg_line.centroid)
@@ -517,7 +511,7 @@ class RouteEngine:
     def duration_hours(distance_nm, speed_knots):
         return distance_nm / max(speed_knots, 1e-9)
 
-    def compute_route(self, waypoints, speed_knots, departure_time_utc, optimize_for="distance"):
+    def compute_route(self, waypoints, speed_knots, departure_time_utc, optimize_for="distance", vessel_type="cargo", draft_meters=10.0, ice_class="none"):
         from datetime import timedelta
 
         waypoints = [WP.from_maybe(w) for w in waypoints]
@@ -531,7 +525,7 @@ class RouteEngine:
                 path = [(a.lat, a.lon)]
                 dist = 0.0
             else:
-                path = self._leg_path(a, b)
+                path = self._leg_path(a, b, vessel_type=vessel_type, ice_class=ice_class)
                 dist = geo.polyline_length_nm(path)
             eca = self._eca_distance(path, [e[2] for e in self.ecas])
             crossing_list = self._crossings(path)
@@ -560,4 +554,9 @@ class RouteEngine:
             "totalDurationHours": round(duration, 2),
             "etaUTC": eta.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "crossings": all_crossings,
+            "vessel": {
+                "type": vessel_type,
+                "draftMeters": draft_meters,
+                "iceClass": ice_class,
+            },
         }

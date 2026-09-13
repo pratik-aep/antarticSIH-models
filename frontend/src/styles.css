@@ -239,6 +239,58 @@ body {
 .bm-label { font-weight: 700; font-size: 12.5px; }
 .bm-desc { font-size: 10.5px; color: var(--ink-soft); }
 
+/* ----------------------------------------------------------- vessel selector */
+.vessel-section { position: relative; }
+.vessel-dropdown-container { position: relative; width: 100%; margin-bottom: 10px; }
+.vessel-select-trigger {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 8px 12px; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink);
+  cursor: pointer; box-shadow: var(--shadow); transition: all 0.15s;
+}
+.vessel-select-trigger:hover { border-color: #c8d4e4; }
+.vessel-icon { font-size: 16px; display: flex; align-items: center; }
+.vessel-label { flex: 1; text-align: left; }
+.vessel-arrow { color: var(--ink-soft); transition: transform 0.2s; }
+.vessel-arrow.open { transform: rotate(180deg); }
+
+.vessel-dropdown-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(16,24,40,0.16); padding: 4px; max-height: 280px; overflow-y: auto;
+}
+.vessel-option {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 0; background: transparent; border-radius: 8px;
+  font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; text-align: left;
+  transition: background 0.12s;
+}
+.vessel-option:hover { background: #f2f6fc; }
+.vessel-option.active { background: #eef4ff; color: var(--blue); font-weight: 600; }
+.v-check { width: 14px; color: var(--blue); display: flex; justify-content: center; }
+.v-icon { font-size: 15px; }
+.v-name { flex: 1; }
+
+.vessel-specs-row { display: flex; gap: 8px; }
+.spec-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.spec-label { font-size: 11px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 4px; }
+.spec-input-wrap { display: flex; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; }
+.spec-input { width: 100%; border: 0; outline: 0; padding: 6px 0; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.spec-unit { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
+.spec-select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px; color: var(--ink); background: #fff; }
+
+/* ----------------------------------------------------------- projections */
+.projection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.proj-card {
+  border: 1.5px solid var(--line); border-radius: var(--radius); background: #fff;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; cursor: pointer;
+  font: inherit; text-align: left; transition: all 0.15s;
+}
+.proj-card.active { border-color: var(--blue); background: #f0f5ff; box-shadow: 0 0 0 3px rgba(20,82,196,0.12); }
+.proj-icon { color: var(--blue); margin-bottom: 2px; }
+.proj-label { font-weight: 700; font-size: 12px; }
+.proj-desc { font-size: 10px; color: var(--ink-soft); }
+
 .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 2px; cursor: pointer; }
 .toggle-row input { accent-color: var(--blue); width: 36px; height: 18px; }
 
@@ -259,6 +311,20 @@ body {
   box-shadow: var(--shadow); pointer-events: none; z-index: 5;
   backdrop-filter: blur(4px);
 }
+
+.map-projection-bar {
+  position: absolute; bottom: 22px; left: 16px; display: flex; gap: 4px;
+  background: rgba(255,255,255,0.92); border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px; box-shadow: var(--shadow); z-index: 5;
+  backdrop-filter: blur(4px);
+}
+.map-proj-btn {
+  border: 0; background: transparent; padding: 5px 12px; border-radius: 999px;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); cursor: pointer;
+  transition: all 0.15s;
+}
+.map-proj-btn.active { background: var(--blue); color: #fff; box-shadow: 0 1px 3px rgba(16,24,40,0.18); }
+.map-proj-btn:hover:not(.active) { background: #f0f4fa; color: var(--ink); }
 
 .routing-indicator {
   position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);

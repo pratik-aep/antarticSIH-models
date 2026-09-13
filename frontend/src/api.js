@@ -25,11 +25,11 @@ export async function geocode(lat, lon) {
   return json(res)
 }
 
-export async function computeRoute(waypoints, speedKnots, departureTimeUTC, optimizeFor) {
+export async function computeRoute(waypoints, speedKnots, departureTimeUTC, optimizeFor, vesselType = 'cargo', draftMeters = 10.0, iceClass = 'none') {
   const res = await fetch(`${API_BASE}/route`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ waypoints, speedKnots, departureTimeUTC, optimizeFor }),
+    body: JSON.stringify({ waypoints, speedKnots, departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass }),
   })
   return json(res)
 }

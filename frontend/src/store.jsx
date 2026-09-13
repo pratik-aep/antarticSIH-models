@@ -36,6 +36,11 @@ export function PlannerProvider({ children }) {
   const [speedKnots, setSpeedKnots] = useState(15)
   const [departureTimeUTC, setDepartureTimeUTC] = useState(defaultDeparture())
   const [optimizeFor, setOptimizeFor] = useState('distance')
+  const [vesselType, setVesselType] = useState('cargo')
+  const [draftMeters, setDraftMeters] = useState(10.5)
+  const [iceClass, setIceClass] = useState('none')
+  const [mapProjection, setMapProjection] = useState('mercator')
+
   const [basemap, setBasemap] = useState('standard')
   const [showEca, setShowEca] = useState(true)
   const [showChokepoints, setShowChokepoints] = useState(false)
@@ -55,7 +60,7 @@ export function PlannerProvider({ children }) {
 
   const removeWaypoint = useCallback((index) => {
     setWaypoints(prev => {
-      if (prev.length <= 2) { // invariant: >= 2 rows minimum
+      if (prev.length <= 2) {
         const w = prev[index]
         if (w && typeof w.lat === 'number') {
           return prev.map((p, i) =>
@@ -79,10 +84,6 @@ export function PlannerProvider({ children }) {
 
   const valid = validWaypoints(waypoints)
 
-  // ------------------------------------------------------- Stage 3: backend routing
-  // Debounce requests: 350 ms from last state change so slider drags / typing
-  // don't hammer the backend. Waypoint changes still get a response within that
-  // window — no perceivable lag.
   useEffect(() => {
     if (!valid) {
       setRoute(null)
@@ -102,8 +103,19 @@ export function PlannerProvider({ children }) {
           speedKnots,
           departureTimeUTC,
           optimizeFor,
+          vesselType,
+          draftMeters,
+          iceClass,
         }
-        const res = await computeRoute(payload.waypoints, payload.speedKnots, payload.departureTimeUTC, payload.optimizeFor)
+        const res = await computeRoute(
+          payload.waypoints,
+          payload.speedKnots,
+          payload.departureTimeUTC,
+          payload.optimizeFor,
+          payload.vesselType,
+          payload.draftMeters,
+          payload.iceClass,
+        )
         if (active) { setRoute(res); setRouteLoading(false) }
       } catch (err) {
         if (active) {
@@ -116,13 +128,17 @@ export function PlannerProvider({ children }) {
 
     timer = setTimeout(run, 350)
     return () => { active = false; clearTimeout(timer) }
-  }, [waypoints, speedKnots, departureTimeUTC, optimizeFor, valid])
+  }, [waypoints, speedKnots, departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, valid])
 
   const value = useMemo(() => ({
     waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint,
     speedKnots, setSpeedKnots,
     departureTimeUTC, setDepartureTimeUTC,
     optimizeFor, setOptimizeFor,
+    vesselType, setVesselType,
+    draftMeters, setDraftMeters,
+    iceClass, setIceClass,
+    mapProjection, setMapProjection,
     basemap, setBasemap,
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
@@ -130,7 +146,8 @@ export function PlannerProvider({ children }) {
     route, routeLoading, routeError,
     valid,
   }), [waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint, speedKnots,
-       departureTimeUTC, optimizeFor, basemap, showEca, showChokepoints, showChevrons,
+       departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, mapProjection,
+       basemap, showEca, showChokepoints, showChevrons,
        route, routeLoading, routeError, valid])
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>

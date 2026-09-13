@@ -42,7 +42,8 @@ export default function MapView() {
   const mapRef = useRef(null)
   const {
     waypoints, addWaypoint, route, routeLoading,
-    basemap, showEca, showChokepoints, showChevrons,
+    basemap, mapProjection, setMapProjection,
+    showEca, showChokepoints, showChevrons,
   } = usePlanner()
 
   const addRef = useRef(addWaypoint)
@@ -274,6 +275,39 @@ export default function MapView() {
     map.setLayoutProperty('basemap-light', 'visibility', target === 'basemap-light' ? 'visible' : 'none')
   }, [basemap])
 
+  // ---- projection & polar view switcher ----
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    try {
+      if (mapProjection === 'wgs84') {
+        if (typeof map.setProjection === 'function') {
+          map.setProjection({ type: 'globe' })
+        }
+        map.flyTo({ center: [0, 20], zoom: 1.8, pitch: 0, duration: 1000 })
+      } else if (mapProjection === 'arctic') {
+        if (typeof map.setProjection === 'function') {
+          map.setProjection({ type: 'globe' })
+        }
+        map.flyTo({ center: [0, 85], zoom: 2.5, pitch: 10, duration: 1000 })
+      } else if (mapProjection === 'antarctic') {
+        if (typeof map.setProjection === 'function') {
+          map.setProjection({ type: 'globe' })
+        }
+        map.flyTo({ center: [0, -82], zoom: 2.5, pitch: 10, duration: 1000 })
+      } else {
+        // mercator
+        if (typeof map.setProjection === 'function') {
+          map.setProjection({ type: 'mercator' })
+        }
+        map.flyTo({ center: [66, 12], zoom: 2.4, pitch: 0, duration: 1000 })
+      }
+    } catch {
+      /* fallback if projection mode unsupported */
+    }
+  }, [mapProjection])
+
   // ---- fit to route once computed (not on every keystroke) ----
   const fittedRef = useRef('')
 
@@ -298,6 +332,25 @@ export default function MapView() {
     <div className="map-wrap">
       <div ref={containerRef} className="map" />
       <div className="map-hint">Click the map to add a waypoint</div>
+      
+      <div className="map-projection-bar">
+        {[
+          ['mercator', 'Mercator'],
+          ['wgs84', 'WGS84'],
+          ['arctic', 'Arctic'],
+          ['antarctic', 'Antarctic'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={`map-proj-btn ${mapProjection === key ? 'active' : ''}`}
+            onClick={() => setMapProjection(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {routeLoading && <div className="routing-indicator"><span className="spinner" /> Routing…</div>}
     </div>
   )

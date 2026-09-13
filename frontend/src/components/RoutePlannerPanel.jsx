@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { Plus, Settings as SettingsIcon, Route as RouteIcon, Anchor } from 'lucide-react'
+import { Plus, Settings as SettingsIcon, Route as RouteIcon, Anchor, Globe } from 'lucide-react'
 import WaypointRow from './WaypointRow'
 import ResultsPanel from './ResultsPanel'
+import VesselSelector from './VesselSelector'
 import { usePlanner } from '../store'
 
 function PlannerTab() {
@@ -20,6 +21,8 @@ function PlannerTab() {
 
   return (
     <div className="planner-body">
+      <VesselSelector />
+
       <section className="section stops">
         <div className="section-head">
           <span className="section-title">Route points</span>
@@ -95,10 +98,38 @@ function PlannerTab() {
 }
 
 function SettingsTab() {
-  const { basemap, setBasemap, showEca, setShowEca, showChokepoints, setShowChokepoints, showChevrons, setShowChevrons } = usePlanner()
+  const {
+    basemap, setBasemap,
+    mapProjection, setMapProjection,
+    showEca, setShowEca,
+    showChokepoints, setShowChokepoints,
+    showChevrons, setShowChevrons,
+  } = usePlanner()
 
   return (
     <div className="planner-body settings-body">
+      <section className="section">
+        <div className="section-head"><span className="section-title">Map View / Projection</span></div>
+        <div className="projection-grid">
+          {[
+            ['mercator', 'Mercator', 'Standard 2D'],
+            ['wgs84', 'WGS84', '3D Globe'],
+            ['arctic', 'Arctic', 'North Polar'],
+            ['antarctic', 'Antarctic', 'South Polar'],
+          ].map(([key, label, desc]) => (
+            <button
+              key={key}
+              className={`proj-card ${mapProjection === key ? 'active' : ''}`}
+              onClick={() => setMapProjection(key)}
+            >
+              <Globe size={14} className="proj-icon" />
+              <span className="proj-label">{label}</span>
+              <span className="proj-desc">{desc}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="section">
         <div className="section-head"><span className="section-title">Basemap</span></div>
         <div className="basemap-grid">
@@ -134,10 +165,8 @@ function SettingsTab() {
       <section className="section about-box">
         <p><strong>Ship Route Planner</strong> — v1</p>
         <p>
-          Geodesic polyline routing with land avoidance on a 0.5° navigation grid.
-          Chokepoint crossings and ECA distance are computed from the routed line.
-          Suez / Panama and narrow straits are below grid resolution, so canal
-          transits route around in v1 — planned for the phase-2 finer grid.
+          Geodesic polyline routing with vessel-specific constraints and land avoidance on a 0.5° navigation grid.
+          Supports Mercator, WGS84 (Globe), Arctic, and Antarctic views.
         </p>
         <p className="attribution">
           Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ·

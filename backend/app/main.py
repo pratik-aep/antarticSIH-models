@@ -47,6 +47,9 @@ class RouteRequest(BaseModel):
     speedKnots: float = Field(gt=0, description="1-24 kn in the UI; not hard-clamped server-side")
     departureTimeUTC: str = Field(default="", description="ISO 8601")
     optimizeFor: str = "distance"  # 'distance' | 'time' (@see phase 2)
+    vesselType: str = Field(default="cargo", description="cargo, tanker, passenger, service, fishing, icebreaker, research, other")
+    draftMeters: float = Field(default=10.0, description="vessel operational draft in meters")
+    iceClass: str = Field(default="none", description="none, pc1_pc7, icebreaker")
 
 
 def _parse_departure(raw: str) -> datetime:
@@ -111,6 +114,9 @@ async def compute_route(req: RouteRequest):
             speed_knots=req.speedKnots,
             departure_time_utc=dep,
             optimize_for=req.optimizeFor or "distance",
+            vessel_type=req.vesselType,
+            draft_meters=req.draftMeters,
+            ice_class=req.iceClass,
         )
     except RouteError as exc:
         raise HTTPException(422, str(exc)) from exc
