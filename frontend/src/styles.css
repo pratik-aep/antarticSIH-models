@@ -388,7 +388,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   z-index: 10;
   transition: transform 0.1s linear;
 }
@@ -397,6 +398,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
 }
 .iceberg-drift-arrow {
   position: absolute;
@@ -409,11 +412,15 @@ body {
   z-index: 12;
   transform-origin: center center;
   transition: transform 0.2s ease-out;
+  pointer-events: auto;
+  cursor: pointer;
 }
 .iceberg-svg-icon {
   width: 28px;
   height: 28px;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.35));
+  pointer-events: auto;
+  cursor: pointer;
 }
 .iceberg-label {
   background: rgba(255, 255, 255, 0.92);
@@ -426,6 +433,8 @@ body {
   white-space: nowrap;
   box-shadow: 0 1px 4px rgba(0,0,0,0.18);
   margin-top: 1px;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .ship-marker-el {
@@ -648,6 +657,10 @@ body {
   border-top: 3px solid #a855f7;
 }
 
+.vector-popup-card.iceberg {
+  border-top: 3px solid #ff7a00;
+}
+
 .vector-popup-header {
   display: flex;
   align-items: center;
@@ -699,6 +712,12 @@ body {
   border: 1px solid rgba(59, 130, 246, 0.35);
 }
 
+.vector-badge.iceberg {
+  background: rgba(255, 122, 0, 0.22);
+  color: #ffaa55;
+  border: 1px solid rgba(255, 122, 0, 0.35);
+}
+
 .vector-popup-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -712,6 +731,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+.vector-stat-box.full-row {
+  grid-column: 1 / -1;
 }
 
 .stat-label {

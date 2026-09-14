@@ -144,6 +144,7 @@ function createArrowImageData(fillColor, strokeColor = '#ffffff') {
 export default function MapView() {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
+  const hoverPopupRef = useRef(null)
   const {
     waypoints, addWaypoint, route, routeLoading,
     basemap, mapProjection, setMapProjection,
@@ -354,6 +355,7 @@ export default function MapView() {
         className: 'vector-hover-popup',
         offset: 10,
       })
+      hoverPopupRef.current = vectorPopup
 
       const registerVectorHover = (layerId, title, icon, cardClass) => {
         map.on('mousemove', layerId, (e) => {
@@ -389,12 +391,16 @@ export default function MapView() {
                   <span class="stat-value"><strong>${dir}°</strong> ${cardinal ? `(${cardinal})` : ''}</span>
                 </div>
                 <div class="vector-stat-box">
-                  <span class="stat-label">Vector (u, v)</span>
-                  <span class="stat-value">${u >= 0 ? '+' : ''}${u}, ${v >= 0 ? '+' : ''}${v} m/s</span>
+                  <span class="stat-label">Latitude</span>
+                  <span class="stat-value"><strong>${coords[1].toFixed(2)}°</strong></span>
                 </div>
                 <div class="vector-stat-box">
-                  <span class="stat-label">Location</span>
-                  <span class="stat-value">${coords[1].toFixed(2)}°, ${coords[0].toFixed(2)}°</span>
+                  <span class="stat-label">Longitude</span>
+                  <span class="stat-value"><strong>${coords[0].toFixed(2)}°</strong></span>
+                </div>
+                <div class="vector-stat-box full-row">
+                  <span class="stat-label">Vector (u, v)</span>
+                  <span class="stat-value">${u >= 0 ? '+' : ''}${u}, ${v >= 0 ? '+' : ''}${v} m/s</span>
                 </div>
               </div>
             </div>
@@ -403,7 +409,7 @@ export default function MapView() {
         })
 
         map.on('mouseleave', layerId, () => {
-          map.getCanvas().style.cursor = 'crosshair'
+          map.getCanvas().style.cursor = ''
           vectorPopup.remove()
         })
       }
@@ -411,15 +417,6 @@ export default function MapView() {
       registerVectorHover('ocean-currents-vectors', 'Ocean Current', '🌊', 'ocean')
       registerVectorHover('wind-vectors', 'Surface Wind (10m)', '💨', 'wind')
 
-      map.on('click', async (e) => {
-        if (wpLenRef.current >= MAX_WAYPOINTS) return
-        const { lat, lng } = e.lngLat
-        try {
-          const place = await geocode(lat.toFixed(4), lng.toFixed(4))
-          addRef.current({ label: place.label, countryCode: place.countryCode || '', lat: place.lat, lon: place.lon, isPort: !!place.isPort })
-        } catch { /* ignore */ }
-      })
-      map.getCanvas().style.cursor = 'crosshair'
       drawRouteRef.current()
       syncRef.current()
     })
@@ -519,13 +516,74 @@ export default function MapView() {
       const heading = typeof pos.headingDeg === 'number' ? pos.headingDeg : (berg.headingDeg || 0)
       const speed = typeof pos.speedKnots === 'number' ? pos.speedKnots : (berg.speedKnots || 0.5)
 
+      const attachHoverListeners = (el) => {
+        el.onmouseenter = () => {
+          const popup = hoverPopupRef.current
+          const mapInstance = mapRef.current
+          if (!popup || !mapInstance) return
+          const cardinal = getCardinalDirection(heading)
+          const currentStr = berg.currentSpeedKnots !== undefined ? `${berg.currentSpeedKnots} kn @ ${berg.currentDirDeg}°` : ''
+          const windStr = berg.windSpeedKnots !== undefined ? `${berg.windSpeedKnots} kn @ ${berg.windDirDeg}°` : ''
+          const html = `
+            <div class="vector-popup-card iceberg">
+              <div class="vector-popup-header">
+                <div class="vector-title-box">
+                  <span class="vector-icon">🔺</span>
+                  <span class="vector-title">${berg.name || berg.id}</span>
+                </div>
+                <span class="vector-badge iceberg">${berg.sizeCategory || 'iceberg'}</span>
+              </div>
+              <div class="vector-popup-grid">
+                <div class="vector-stat-box">
+                  <span class="stat-label">Drift Speed</span>
+                  <span class="stat-value"><strong>${speed}</strong> kn</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Drift Heading</span>
+                  <span class="stat-value"><strong>${Math.round(heading)}°</strong> ${cardinal ? `(${cardinal})` : ''}</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Latitude</span>
+                  <span class="stat-value"><strong>${pos.lat.toFixed(4)}°</strong></span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Longitude</span>
+                  <span class="stat-value"><strong>${pos.lon.toFixed(4)}°</strong></span>
+                </div>
+                ${currentStr ? `
+                  <div class="vector-stat-box full-row">
+                    <span class="stat-label">Current Forcing</span>
+                    <span class="stat-value"><strong>${currentStr}</strong></span>
+                  </div>
+                ` : ''}
+                ${windStr ? `
+                  <div class="vector-stat-box full-row">
+                    <span class="stat-label">Wind Forcing</span>
+                    <span class="stat-value"><strong>${windStr}</strong></span>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          `
+          popup.setLngLat([tLon, tLat]).setHTML(html).addTo(mapInstance)
+        }
+
+        el.onmouseleave = () => {
+          if (hoverPopupRef.current) hoverPopupRef.current.remove()
+        }
+      }
+
       if (icebergMarkersRef.current[berg.id]) {
         icebergMarkersRef.current[berg.id].setLngLat([tLon, tLat])
-        const arrowEl = icebergMarkersRef.current[berg.id].getElement().querySelector('.iceberg-drift-arrow')
+        const markerEl = icebergMarkersRef.current[berg.id].getElement()
+        const arrowEl = markerEl.querySelector('.iceberg-drift-arrow')
         if (arrowEl) arrowEl.style.transform = `rotate(${heading}deg)`
+        attachHoverListeners(markerEl)
       } else {
         const el = document.createElement('div')
         el.className = 'iceberg-marker-el'
+        el.style.pointerEvents = 'auto'
+        el.style.cursor = 'pointer'
         el.innerHTML = `
           <div class="iceberg-marker-wrap">
             <div class="iceberg-drift-arrow" style="transform: rotate(${heading}deg);" title="Drift Heading: ${heading}°, Speed: ${speed} kn">
@@ -542,6 +600,7 @@ export default function MapView() {
           </div>
           <div class="iceberg-label">${berg.name || berg.id} (${speed} kn ➔ ${Math.round(heading)}°)</div>
         `
+        attachHoverListeners(el)
         const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
           .setLngLat([tLon, tLat])
           .addTo(map)
@@ -756,7 +815,6 @@ export default function MapView() {
   return (
     <div className="map-wrap">
       <div ref={containerRef} className="map" />
-      <div className="map-hint">Click the map to add a waypoint</div>
       
       <LayerControlPanel />
 
