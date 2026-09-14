@@ -119,13 +119,13 @@ function createArrowImageData(fillColor, strokeColor = '#ffffff') {
 
   ctx.fillStyle = fillColor
   ctx.strokeStyle = strokeColor
-  ctx.lineWidth = 1.8
+  ctx.lineWidth = 1.0
 
   ctx.beginPath()
-  ctx.moveTo(16, 2)   // Arrow tip pointing North (0 deg)
-  ctx.lineTo(27, 26)  // Right wing
-  ctx.lineTo(16, 19)  // Notch
-  ctx.lineTo(5, 26)   // Left wing
+  ctx.moveTo(16, 3)   // Arrow tip pointing North (0 deg)
+  ctx.lineTo(23, 25)  // Right wing (sleek & narrow)
+  ctx.lineTo(16, 20)  // Inner notch
+  ctx.lineTo(9, 25)   // Left wing
   ctx.closePath()
 
   ctx.fill()
@@ -316,11 +316,12 @@ export default function MapView() {
         source: 'ocean-currents',
         layout: {
           'icon-image': 'ocean-current-arrow',
-          'icon-size': 0.65,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 1, 0.35, 4, 0.55, 8, 0.8],
           'icon-rotate': ['get', 'dirDeg'],
           'icon-rotation-alignment': 'map',
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
+          'icon-allow-overlap': false,
+          'icon-ignore-placement': false,
+          'icon-padding': 8,
         },
       })
 
@@ -331,11 +332,12 @@ export default function MapView() {
         source: 'wind',
         layout: {
           'icon-image': 'wind-arrow',
-          'icon-size': 0.6,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 1, 0.35, 4, 0.55, 8, 0.8],
           'icon-rotate': ['get', 'dirDeg'],
           'icon-rotation-alignment': 'map',
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
+          'icon-allow-overlap': false,
+          'icon-ignore-placement': false,
+          'icon-padding': 8,
         },
       })
 

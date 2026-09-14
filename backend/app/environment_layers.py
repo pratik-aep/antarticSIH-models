@@ -13,9 +13,9 @@ import numpy as np
 def ocean_currents_geojson() -> dict:
     """Return GeoJSON representation of ocean current vector field."""
     features = []
-    # Grid resolution for map rendering (3° lat x 4° lon sampling for clear vector arrows)
-    lats = np.arange(-80.0, 80.0, 4.0)
-    lons = np.arange(-180.0, 180.0, 6.0)
+    # Grid resolution for map rendering (5° lat x 7.5° lon sampling for clear vector arrows)
+    lats = np.arange(-80.0, 80.0, 5.0)
+    lons = np.arange(-180.0, 180.0, 7.5)
 
     for la in lats:
         for lo in lons:
@@ -62,8 +62,8 @@ def ocean_currents_geojson() -> dict:
 def wind_geojson() -> dict:
     """Return GeoJSON representation of ERA5 surface wind vector field (10m)."""
     features = []
-    lats = np.arange(-80.0, 80.0, 4.5)
-    lons = np.arange(-180.0, 180.0, 6.5)
+    lats = np.arange(-80.0, 80.0, 5.5)
+    lons = np.arange(-180.0, 180.0, 8.0)
 
     for la in lats:
         for lo in lons:
