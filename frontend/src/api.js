@@ -52,3 +52,18 @@ export async function fetchIcebergs(startTime = '', endTime = '', stepHours = 1.
   const res = await fetch(`${API_BASE}/icebergs?${params.toString()}`)
   return json(res)
 }
+
+export async function fetchSeaIce() {
+  const res = await fetch(`${API_BASE}/sea-ice`)
+  return json(res)
+}
+
+export async function fetchOceanCurrents() {
+  const res = await fetch(`${API_BASE}/ocean-currents`)
+  return json(res)
+}
+
+export async function fetchWind() {
+  const res = await fetch(`${API_BASE}/wind`)
+  return json(res)
+}

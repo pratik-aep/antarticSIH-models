@@ -104,6 +104,7 @@ function SettingsTab() {
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
+    showSeaIce, setShowSeaIce,
   } = usePlanner()
 
   return (
@@ -148,6 +149,10 @@ function SettingsTab() {
 
       <section className="section">
         <div className="section-head"><span className="section-title">Overlays</span></div>
+        <label className="toggle-row">
+          <span>Sea Ice concentration (cyan)</span>
+          <input type="checkbox" checked={showSeaIce} onChange={(e) => setShowSeaIce(e.target.checked)} />
+        </label>
         <label className="toggle-row">
           <span>Emission Control Areas (orange)</span>
           <input type="checkbox" checked={showEca} onChange={(e) => setShowEca(e.target.checked)} />

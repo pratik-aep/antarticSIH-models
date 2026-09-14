@@ -44,6 +44,9 @@ export function PlannerProvider({ children }) {
   const [showEca, setShowEca] = useState(true)
   const [showChokepoints, setShowChokepoints] = useState(false)
   const [showChevrons, setShowChevrons] = useState(true)
+  const [showSeaIce, setShowSeaIce] = useState(true)
+  const [showOceanCurrents, setShowOceanCurrents] = useState(true)
+  const [showWind, setShowWind] = useState(false)
 
   const [route, setRoute] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
@@ -165,6 +168,9 @@ export function PlannerProvider({ children }) {
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
+    showSeaIce, setShowSeaIce,
+    showOceanCurrents, setShowOceanCurrents,
+    showWind, setShowWind,
     route, routeLoading, routeError,
     icebergs,
     sliderTimeISO, setSliderTimeISO,
@@ -173,7 +179,7 @@ export function PlannerProvider({ children }) {
     valid,
   }), [waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint, speedKnots,
        departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, mapProjection,
-       basemap, showEca, showChokepoints, showChevrons,
+       basemap, showEca, showChokepoints, showChevrons, showSeaIce, showOceanCurrents, showWind,
        route, routeLoading, routeError, icebergs, sliderTimeISO, isPlaying, closestApproaches, valid])
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>

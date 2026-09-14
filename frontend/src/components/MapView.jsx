@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { fetchEcas, fetchChokepoints, geocode } from '../api'
+import { fetchEcas, fetchChokepoints, fetchSeaIce, fetchOceanCurrents, fetchWind, geocode } from '../api'
 import { usePlanner } from '../store'
+import LayerControlPanel from './LayerControlPanel'
 import { unwrapLongitudes, splitIntoRenderedParts } from '../geo'
 import { getShipPositionAtTime, getIcebergPositionAtTime } from '../utils'
 
@@ -84,13 +85,39 @@ function transformCoord(lon, lat, projection) {
   return [lon, lat]
 }
 
+function transformGeoJSON(geojson, projection) {
+  if (!geojson || !geojson.features || projection === 'mercator' || projection === 'wgs84') {
+    return geojson
+  }
+  const transformedFeatures = geojson.features.map(feat => {
+    if (!feat.geometry) return feat
+    const geom = feat.geometry
+    if (geom.type === 'Point') {
+      const [tLon, tLat] = transformCoord(geom.coordinates[0], geom.coordinates[1], projection)
+      return { ...feat, geometry: { ...geom, coordinates: [tLon, tLat] } }
+    }
+    if (geom.type === 'Polygon') {
+      const rings = geom.coordinates.map(ring =>
+        ring.map(([lon, lat]) => transformCoord(lon, lat, projection))
+      )
+      return { ...feat, geometry: { ...geom, coordinates: rings } }
+    }
+    if (geom.type === 'LineString') {
+      const coords = geom.coordinates.map(([lon, lat]) => transformCoord(lon, lat, projection))
+      return { ...feat, geometry: { ...geom, coordinates: coords } }
+    }
+    return feat
+  })
+  return { ...geojson, features: transformedFeatures }
+}
+
 export default function MapView() {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const {
     waypoints, addWaypoint, route, routeLoading,
     basemap, mapProjection, setMapProjection,
-    showEca, showChokepoints, showChevrons,
+    showEca, showChokepoints, showChevrons, showSeaIce, showOceanCurrents, showWind,
     icebergs, sliderTimeISO, departureTimeUTC,
   } = usePlanner()
 
@@ -98,6 +125,36 @@ export default function MapView() {
   addRef.current = addWaypoint
   const wpLenRef = useRef(waypoints.length)
   wpLenRef.current = waypoints.length
+
+  const rawSeaIceRef = useRef(null)
+  const rawCurrentsRef = useRef(null)
+  const rawWindRef = useRef(null)
+  const rawEcasRef = useRef(null)
+  const rawChokepointsRef = useRef(null)
+
+  const syncVectorLayers = () => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (rawSeaIceRef.current && map.getSource('sea-ice')) {
+      map.getSource('sea-ice').setData(transformGeoJSON(rawSeaIceRef.current, mapProjection))
+    }
+    if (rawCurrentsRef.current && map.getSource('ocean-currents')) {
+      map.getSource('ocean-currents').setData(transformGeoJSON(rawCurrentsRef.current, mapProjection))
+    }
+    if (rawWindRef.current && map.getSource('wind')) {
+      map.getSource('wind').setData(transformGeoJSON(rawWindRef.current, mapProjection))
+    }
+    if (rawEcasRef.current && map.getSource('ecas')) {
+      map.getSource('ecas').setData(transformGeoJSON(rawEcasRef.current, mapProjection))
+    }
+    if (rawChokepointsRef.current && map.getSource('chokepoints')) {
+      map.getSource('chokepoints').setData(transformGeoJSON(rawChokepointsRef.current, mapProjection))
+    }
+  }
+
+  const syncRef = useRef(syncVectorLayers)
+  syncRef.current = syncVectorLayers
 
   // Always holds a fn drawing the *current* route into the map source
   const drawRouteRef = useRef(() => {})
@@ -205,6 +262,63 @@ export default function MapView() {
         paint: { 'line-color': '#d33', 'line-width': 1.5, 'line-dasharray': [3, 2] },
       })
 
+      map.addSource('sea-ice', { type: 'geojson', data: emptyFeatureCollection() })
+      map.addLayer({
+        id: 'sea-ice-fill',
+        type: 'fill',
+        source: 'sea-ice',
+        paint: {
+          'fill-color': [
+            'match',
+            ['get', 'category'],
+            'heavy', '#0077b6',
+            'medium', '#00b4d8',
+            '#90e0ef'
+          ],
+          'fill-opacity': 0.35,
+        },
+      })
+
+      map.addSource('ocean-currents', { type: 'geojson', data: emptyFeatureCollection() })
+      map.addLayer({
+        id: 'ocean-currents-vectors',
+        type: 'symbol',
+        source: 'ocean-currents',
+        layout: {
+          'text-field': '➔',
+          'text-size': 18,
+          'text-rotate': ['get', 'dirDeg'],
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: {
+          'text-color': '#00b4d8',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1,
+        },
+      })
+
+      map.addSource('wind', { type: 'geojson', data: emptyFeatureCollection() })
+      map.addLayer({
+        id: 'wind-vectors',
+        type: 'symbol',
+        source: 'wind',
+        layout: {
+          'text-field': '➔',
+          'text-size': 16,
+          'text-rotate': ['get', 'dirDeg'],
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: {
+          'text-color': '#9d4edd',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1,
+        },
+      })
+
       map.on('click', async (e) => {
         if (wpLenRef.current >= MAX_WAYPOINTS) return
         const { lat, lng } = e.lngLat
@@ -215,6 +329,7 @@ export default function MapView() {
       })
       map.getCanvas().style.cursor = 'crosshair'
       drawRouteRef.current()
+      syncRef.current()
     })
 
     return () => {
@@ -309,20 +424,31 @@ export default function MapView() {
     icebergs.forEach(berg => {
       const pos = getIcebergPositionAtTime(berg, targetTime)
       const [tLon, tLat] = transformCoord(pos.lon, pos.lat, mapProjection)
+      const heading = typeof pos.headingDeg === 'number' ? pos.headingDeg : (berg.headingDeg || 0)
+      const speed = typeof pos.speedKnots === 'number' ? pos.speedKnots : (berg.speedKnots || 0.5)
 
       if (icebergMarkersRef.current[berg.id]) {
         icebergMarkersRef.current[berg.id].setLngLat([tLon, tLat])
+        const arrowEl = icebergMarkersRef.current[berg.id].getElement().querySelector('.iceberg-drift-arrow')
+        if (arrowEl) arrowEl.style.transform = `rotate(${heading}deg)`
       } else {
         const el = document.createElement('div')
         el.className = 'iceberg-marker-el'
         el.innerHTML = `
-          <div class="iceberg-svg-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <polygon points="12,2 22,21 2,21" fill="#00d2ff" stroke="#005b96" stroke-width="2" stroke-linejoin="round"/>
-              <polygon points="12,2 15,10 12,14 8,11" fill="#ffffff" opacity="0.65"/>
-            </svg>
+          <div class="iceberg-marker-wrap">
+            <div class="iceberg-drift-arrow" style="transform: rotate(${heading}deg);" title="Drift Heading: ${heading}°, Speed: ${speed} kn">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L18 10H14V22H10V10H6L12 2Z" fill="#ff7a00" stroke="#8c3e00" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="iceberg-svg-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="12,2 22,21 2,21" fill="#00d2ff" stroke="#005b96" stroke-width="2" stroke-linejoin="round"/>
+                <polygon points="12,2 15,10 12,14 8,11" fill="#ffffff" opacity="0.65"/>
+              </svg>
+            </div>
           </div>
-          <div class="iceberg-label">${berg.name || berg.id}</div>
+          <div class="iceberg-label">${berg.name || berg.id} (${speed} kn ➔ ${Math.round(heading)}°)</div>
         `
         const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
           .setLngLat([tLon, tLat])
@@ -380,19 +506,63 @@ export default function MapView() {
     }
   }, [route, sliderTimeISO, departureTimeUTC, mapProjection])
 
-  // ---- ECA + chokepoints data ----
+  // ---- ECA + chokepoints + sea-ice + currents + wind data ----
   useEffect(() => {
     let alive = true
     fetchEcas().then(fc => {
-      if (!alive || !mapRef.current || !mapRef.current.getSource('ecas')) return
-      mapRef.current.getSource('ecas').setData(fc)
+      if (!alive) return
+      rawEcasRef.current = fc
+      syncRef.current()
     }).catch(() => {})
+
     fetchChokepoints().then(fc => {
-      if (!alive || !mapRef.current || !mapRef.current.getSource('chokepoints')) return
-      mapRef.current.getSource('chokepoints').setData(fc)
+      if (!alive) return
+      rawChokepointsRef.current = fc
+      syncRef.current()
     }).catch(() => {})
+
+    fetchSeaIce().then(fc => {
+      if (!alive) return
+      rawSeaIceRef.current = fc
+      syncRef.current()
+    }).catch(() => {})
+
+    fetchOceanCurrents().then(fc => {
+      if (!alive) return
+      rawCurrentsRef.current = fc
+      syncRef.current()
+    }).catch(() => {})
+
+    fetchWind().then(fc => {
+      if (!alive) return
+      rawWindRef.current = fc
+      syncRef.current()
+    }).catch(() => {})
+
     return () => { alive = false }
   }, [])
+
+  useEffect(() => {
+    syncVectorLayers()
+  }, [mapProjection, syncVectorLayers])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !map.getLayer('sea-ice-fill')) return
+    map.setLayoutProperty('sea-ice-fill', 'visibility', showSeaIce ? 'visible' : 'none')
+  }, [showSeaIce])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !map.getLayer('ocean-currents-vectors')) return
+    map.setLayoutProperty('ocean-currents-vectors', 'visibility', showOceanCurrents ? 'visible' : 'none')
+  }, [showOceanCurrents])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !map.getLayer('wind-vectors')) return
+    map.setLayoutProperty('wind-vectors', 'visibility', showWind ? 'visible' : 'none')
+  }, [showWind])
 
   useEffect(() => {
     const map = mapRef.current
@@ -496,6 +666,8 @@ export default function MapView() {
       <div ref={containerRef} className="map" />
       <div className="map-hint">Click the map to add a waypoint</div>
       
+      <LayerControlPanel />
+
       <div className="map-projection-bar">
         {[
           ['mercator', 'Mercator'],

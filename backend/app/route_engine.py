@@ -16,6 +16,7 @@ import shapely.geometry as sgeo
 
 from . import geo
 from .mask import LandMask, LAT_TOP, LON_LEFT, NROWS, NCOLS, SPACING
+from .sea_ice import get_sea_ice_concentration
 
 A_STAR = True
 
@@ -173,6 +174,21 @@ class GridRouter:
                 if lat_rr > self.arctic_pen_lat:
                     d = lat_rr - self.arctic_pen_lat
                     edge += arctic_pen * d * d * geo.NM_TO_M
+
+                # Sea-ice concentration cost weighting
+                lon_cc = (self.lons[cc] % 360.0) - 180.0
+                ice_conc = get_sea_ice_concentration(lat_rr, lon_cc)
+                if not is_polar:
+                    if ice_conc > 45.0:
+                        continue  # Heavy ice is impassable for non-polar cargo vessels
+                    elif ice_conc >= 15.0:
+                        # Add sea ice resistance penalty so A* seeks open water / light ice channels
+                        edge *= (1.0 + 0.08 * (ice_conc - 15.0))
+                else:
+                    # Icebreakers prefer open water / low concentration channels when available
+                    if ice_conc > 0.0:
+                        edge *= (1.0 + 0.015 * ice_conc)
+
                 tentative = g[node] + edge
                 if tentative < g.get(nb, float("inf")):
                     g[nb] = tentative
@@ -545,12 +561,29 @@ class RouteEngine:
                     seen.add(c)
                     all_crossings.append(c)
 
+        # Compute sea-ice metrics along the computed path
+        total_ice_nm = 0.0
+        max_ice_conc = 0.0
+        for leg in legs:
+            path_pts = leg["path"]
+            for p1, p2 in zip(path_pts, path_pts[1:]):
+                mid_lat = (p1[0] + p2[0]) / 2.0
+                mid_lon = (p1[1] + p2[1]) / 2.0
+                seg_dist = geo.geodesic_distance_nm(p1[0], p1[1], p2[0], p2[1])
+                conc = get_sea_ice_concentration(mid_lat, mid_lon)
+                if conc > max_ice_conc:
+                    max_ice_conc = conc
+                if conc >= 15.0:
+                    total_ice_nm += seg_dist
+
         duration = totals_nm / max(speed_knots, 1e-9)
         eta = departure_time_utc + timedelta(hours=duration)
         return {
             "legs": legs,
             "totalDistanceNm": round(totals_nm, 1),
             "totalDistanceInEcaNm": round(totals_eca, 1),
+            "totalDistanceInSeaIceNm": round(total_ice_nm, 1),
+            "maxSeaIceConcentrationPct": round(max_ice_conc, 1),
             "totalDurationHours": round(duration, 2),
             "etaUTC": eta.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "crossings": all_crossings,

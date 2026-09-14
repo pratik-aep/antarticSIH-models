@@ -158,3 +158,21 @@ async def icebergs(
     else:
         dep_end = dep_start + timedelta(days=7)
     return get_all_icebergs_with_trajectories(dep_start, dep_end, step_hours=stepHours)
+
+
+@app.get("/api/sea-ice")
+async def sea_ice():
+    from .sea_ice import sea_ice_geojson
+    return sea_ice_geojson()
+
+
+@app.get("/api/ocean-currents")
+async def ocean_currents():
+    from .environment_layers import ocean_currents_geojson
+    return ocean_currents_geojson()
+
+
+@app.get("/api/wind")
+async def wind():
+    from .environment_layers import wind_geojson
+    return wind_geojson()

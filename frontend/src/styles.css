@@ -392,6 +392,24 @@ body {
   z-index: 10;
   transition: transform 0.1s linear;
 }
+.iceberg-marker-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.iceberg-drift-arrow {
+  position: absolute;
+  top: -10px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 12;
+  transform-origin: center center;
+  transition: transform 0.2s ease-out;
+}
 .iceberg-svg-icon {
   width: 28px;
   height: 28px;
@@ -407,7 +425,7 @@ body {
   border: 1px solid rgba(13, 58, 143, 0.25);
   white-space: nowrap;
   box-shadow: 0 1px 4px rgba(0,0,0,0.18);
-  margin-top: -2px;
+  margin-top: 1px;
 }
 
 .ship-marker-el {
@@ -438,4 +456,160 @@ body {
   position: relative;
   z-index: 2;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+}
+
+/* ----------------------------------------------------------- Right Layer Control Bar */
+.right-layer-bar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.layer-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  transition: all 0.15s;
+}
+.layer-toggle-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.layer-badge {
+  background: var(--blue);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chevron-icon {
+  transition: transform 0.2s;
+  color: var(--ink-soft);
+}
+.chevron-icon.open {
+  transform: rotate(90deg);
+}
+
+.layer-panel-content {
+  width: 280px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(16, 24, 40, 0.16);
+  padding: 12px;
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.layer-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #eef2f7;
+  padding-bottom: 8px;
+}
+.lp-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--ink-soft);
+}
+.lp-quick-actions {
+  display: flex;
+  gap: 4px;
+}
+.lp-quick-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.lp-quick-btn:hover {
+  background: #f0f4fa;
+  color: var(--blue);
+}
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.layer-item:hover {
+  background: #f2f6fc;
+}
+.layer-item input[type='checkbox'] {
+  accent-color: var(--blue);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.layer-item-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.layer-item-icon.currents { background: #e0f2fe; color: #0284c7; }
+.layer-item-icon.wind { background: #f3e8ff; color: #9333ea; }
+.layer-item-icon.ice { background: #cff4fc; color: #055160; }
+.layer-item-icon.eca { background: #ffedd5; color: #c2410c; }
+.layer-item-icon.chokepoint { background: #fee2e2; color: #b91c1c; }
+.layer-item-icon.chevrons { background: #eff6ff; color: #1d4ed8; }
+
+.layer-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.layer-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.layer-sub {
+  font-size: 10px;
+  color: var(--ink-soft);
 }

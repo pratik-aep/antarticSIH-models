@@ -100,6 +100,7 @@ export default function ResultsPanel({ route, loading, error }) {
 
       <Row icon={<Ship size={15} />} label="Distance" value={`${route.totalDistanceNm.toLocaleString()} nm`} sub="total geodesic" />
       <Row icon={<MapPin size={15} />} label="Distance in ECA" value={route.totalDistanceInEcaNm ? `${route.totalDistanceInEcaNm.toLocaleString()} nm` : '0 nm'} sub={route.totalDistanceInEcaNm ? 'Emission control areas' : undefined} />
+      <Row icon={<span style={{ fontSize: 13 }}>🧊</span>} label="Distance in Sea Ice" value={route.totalDistanceInSeaIceNm ? `${route.totalDistanceInSeaIceNm.toLocaleString()} nm` : '0 nm'} sub={route.maxSeaIceConcentrationPct ? `Max conc: ${route.maxSeaIceConcentrationPct}%` : 'Open water'} />
       <Row icon={<Navigation size={15} />} label="Duration" value={fmtHours(route.totalDurationHours)} />
       <div className="res-row">
         <span className="res-icon">🕒</span>
