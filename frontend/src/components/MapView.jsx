@@ -111,6 +111,29 @@ function transformGeoJSON(geojson, projection) {
   return { ...geojson, features: transformedFeatures }
 }
 
+function createArrowImageData(fillColor, strokeColor = '#ffffff') {
+  const canvas = document.createElement('canvas')
+  canvas.width = 32
+  canvas.height = 32
+  const ctx = canvas.getContext('2d')
+
+  ctx.fillStyle = fillColor
+  ctx.strokeStyle = strokeColor
+  ctx.lineWidth = 1.8
+
+  ctx.beginPath()
+  ctx.moveTo(16, 2)   // Arrow tip pointing North (0 deg)
+  ctx.lineTo(27, 26)  // Right wing
+  ctx.lineTo(16, 19)  // Notch
+  ctx.lineTo(5, 26)   // Left wing
+  ctx.closePath()
+
+  ctx.fill()
+  ctx.stroke()
+
+  return ctx.getImageData(0, 0, 32, 32)
+}
+
 export default function MapView() {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
@@ -279,23 +302,25 @@ export default function MapView() {
         },
       })
 
+      if (!map.hasImage('ocean-current-arrow')) {
+        map.addImage('ocean-current-arrow', createArrowImageData('#00b4d8', '#004b6e'))
+      }
+      if (!map.hasImage('wind-arrow')) {
+        map.addImage('wind-arrow', createArrowImageData('#a855f7', '#4c1d95'))
+      }
+
       map.addSource('ocean-currents', { type: 'geojson', data: emptyFeatureCollection() })
       map.addLayer({
         id: 'ocean-currents-vectors',
         type: 'symbol',
         source: 'ocean-currents',
         layout: {
-          'text-field': '➔',
-          'text-size': 18,
-          'text-rotate': ['get', 'dirDeg'],
-          'text-rotation-alignment': 'map',
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
-        },
-        paint: {
-          'text-color': '#00b4d8',
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 1,
+          'icon-image': 'ocean-current-arrow',
+          'icon-size': 0.65,
+          'icon-rotate': ['get', 'dirDeg'],
+          'icon-rotation-alignment': 'map',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       })
 
@@ -305,17 +330,12 @@ export default function MapView() {
         type: 'symbol',
         source: 'wind',
         layout: {
-          'text-field': '➔',
-          'text-size': 16,
-          'text-rotate': ['get', 'dirDeg'],
-          'text-rotation-alignment': 'map',
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
-        },
-        paint: {
-          'text-color': '#9d4edd',
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 1,
+          'icon-image': 'wind-arrow',
+          'icon-size': 0.6,
+          'icon-rotate': ['get', 'dirDeg'],
+          'icon-rotation-alignment': 'map',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       })
 
