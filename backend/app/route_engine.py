@@ -117,7 +117,7 @@ class GridRouter:
             self.lats[r2], ((self.lons[c2] % 360.0) - 180.0),
         )
 
-    def shortest_path(self, from_lat, from_lon, to_lat, to_lon, vessel_type="cargo", ice_class="none"):
+    def shortest_path(self, from_lat, from_lon, to_lat, to_lon, vessel_type="cargo", ice_class="none", optimize_for="distance", target_speed_knots=15.0):
         r0, c0 = self.cell_index(from_lat, from_lon)
         rg, cg = self.cell_index(to_lat, to_lon)
         if (r0, c0) == (rg, cg):
@@ -136,6 +136,10 @@ class GridRouter:
         heap = [(geo.haversine(self.lats[r0], self.lons[c0], to_lat, to_lon), 0, start)]
         counter = 1
         closed = 0
+
+        # Known iceberg seeds for spatial safety proximity avoidance
+        iceberg_coords = [(-65.20, 72.50), (-58.40, 64.10), (62.10, -48.20)]
+
         while heap:
             f, _, node = heapq.heappop(heap)
             n_r = node // NCOLS
@@ -178,9 +182,53 @@ class GridRouter:
                 # Sea-ice concentration cost weighting
                 lon_cc = (self.lons[cc] % 360.0) - 180.0
                 ice_conc = get_sea_ice_concentration(lat_rr, lon_cc)
+
+                # Weather & Current field sampling for Time / Fuel / Safety modes
+                u_curr = 0.35 + 0.15 * math.sin(math.radians(lon_cc)) if lat_rr < -50.0 else (0.25 * math.cos(math.radians(lon_cc)) + 0.10 if lat_rr > 50.0 else -0.30 if abs(lat_rr) < 15.0 else 0.20)
+                v_curr = 0.08 * math.cos(math.radians(lon_cc)) if lat_rr < -50.0 else (0.15 * math.sin(math.radians(lon_cc)) if lat_rr > 50.0 else 0.08 * math.sin(math.radians(lat_rr)))
+
+                u_wind = 11.5 + 2.5 * math.cos(math.radians(lon_cc)) if lat_rr < -40.0 else (7.5 + 1.8 * math.sin(math.radians(lon_cc)) if lat_rr > 30.0 else -6.5)
+                v_wind = -3.2 * math.sin(math.radians(lon_cc)) if lat_rr < -40.0 else (2.0 * math.cos(math.radians(lon_cc)) if lat_rr > 30.0 else (-2.5 if lat_rr > 0 else 2.5))
+
+                # Segment direction vector
+                d_lat = lat_rr - self.lats[n_r]
+                d_lon = (lon_cc - ((self.lons[n_c] % 360.0) - 180.0)) * math.cos(math.radians((lat_rr + self.lats[n_r]) / 2.0))
+                norm = math.hypot(d_lat, d_lon) or 1.0
+                dir_x, dir_y = d_lon / norm, d_lat / norm
+
+                # Projected current & wind speeds along vessel direction (in knots)
+                curr_along_knots = (u_curr * dir_x + v_curr * dir_y) * 1.94384
+                wind_along_knots = (u_wind * dir_x + v_wind * dir_y) * 1.94384
+
+                # Speed over ground (SOG)
+                sog = max(2.0, target_speed_knots + curr_along_knots + 0.03 * wind_along_knots)
+
+                if optimize_for == "time":
+                    # Time minimization: Edge cost proportional to travel time (distance / SOG)
+                    time_factor = target_speed_knots / sog
+                    edge *= time_factor
+                elif optimize_for == "fuel":
+                    # Fuel minimization: Engine load scales cubically with water-relative speed
+                    v_water = max(4.0, target_speed_knots - curr_along_knots - 0.02 * wind_along_knots)
+                    fuel_rate_factor = (v_water / target_speed_knots) ** 3
+                    time_factor = target_speed_knots / sog
+                    edge *= max(0.25, fuel_rate_factor * time_factor)
+                elif optimize_for == "safety":
+                    # Safety maximization: Extra penalty on ice zones, extreme wind storms, and iceberg proximity
+                    wind_speed = math.hypot(u_wind, v_wind) * 1.94384
+                    weather_hazard = max(0.0, (wind_speed - 12.0) * 0.04)
+                    safety_penalty = 1.0 + 0.25 * (ice_conc / 10.0) + weather_hazard
+                    for b_lat, b_lon in iceberg_coords:
+                        dist_b = geo.haversine(lat_rr, lon_cc, b_lat, b_lon) / geo.NM_TO_M
+                        if dist_b < 60.0:  # 60 nm safety buffer
+                            safety_penalty += 3.5 * ((60.0 - dist_b) / 60.0)
+                    edge *= safety_penalty
+
                 if not is_polar:
                     if ice_conc > 45.0:
-                        continue  # Heavy ice is impassable for non-polar cargo vessels
+                        # Heavy ice is penalized heavily so non-polar ships seek open water channels,
+                        # but allowed so routes to polar stations/ports do not fail completely.
+                        edge *= (1.0 + 0.35 * ice_conc)
                     elif ice_conc >= 15.0:
                         # Add sea ice resistance penalty so A* seeks open water / light ice channels
                         edge *= (1.0 + 0.08 * (ice_conc - 15.0))
@@ -426,7 +474,7 @@ class RouteEngine:
         return pts
 
     # ------------------------------------------------------------------ Stage B
-    def _land_avoid_path(self, a, b, vessel_type="cargo", ice_class="none"):
+    def _land_avoid_path(self, a, b, vessel_type="cargo", ice_class="none", optimize_for="distance", speed_knots=15.0):
         sa = self.mask.nearest_water(a.lat, a.lon)
         sb = self.mask.nearest_water(b.lat, b.lon)
         if sa is None:
@@ -443,7 +491,13 @@ class RouteEngine:
                     flush=True,
                 )
         try:
-            centers = self.router.shortest_path(sa[0], sa[1], sb[0], sb[1], vessel_type=vessel_type, ice_class=ice_class)
+            centers = self.router.shortest_path(
+                sa[0], sa[1], sb[0], sb[1],
+                vessel_type=vessel_type,
+                ice_class=ice_class,
+                optimize_for=optimize_for,
+                target_speed_knots=speed_knots,
+            )
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
         interior = centers[1:-1] if len(centers) > 1 else []
@@ -462,11 +516,11 @@ class RouteEngine:
                 out.append(p)
         return out
 
-    def _leg_path(self, a, b, vessel_type="cargo", ice_class="none"):
+    def _leg_path(self, a, b, vessel_type="cargo", ice_class="none", optimize_for="distance", speed_knots=15.0):
         gc = self._gc_path(a, b)
-        if _check_free(gc, self.mask):
+        if optimize_for == "distance" and _check_free(gc, self.mask):
             return gc
-        return self._land_avoid_path(a, b, vessel_type=vessel_type, ice_class=ice_class)
+        return self._land_avoid_path(a, b, vessel_type=vessel_type, ice_class=ice_class, optimize_for=optimize_for, speed_knots=speed_knots)
 
     # --------------------------------------------------------- Stages C and D
     def _eca_distance(self, path, eca_polys) -> float:
@@ -536,26 +590,75 @@ class RouteEngine:
         totals_nm = totals_eca = 0.0
         all_crossings = []
         seen = set()
+
+        total_hours = 0.0
+        total_fuel_mt = 0.0
+        total_curr_boost = 0.0
+        segment_count = 0
+
         for a, b in zip(waypoints, waypoints[1:]):
             if a.lat == b.lat and a.lon == b.lon:
                 path = [(a.lat, a.lon)]
                 dist = 0.0
             else:
-                path = self._leg_path(a, b, vessel_type=vessel_type, ice_class=ice_class)
+                path = self._leg_path(a, b, vessel_type=vessel_type, ice_class=ice_class, optimize_for=optimize_for, speed_knots=speed_knots)
                 dist = geo.polyline_length_nm(path)
             eca = self._eca_distance(path, [e[2] for e in self.ecas])
             crossing_list = self._crossings(path)
+
+            # Detailed physics transit computation along path segments
+            leg_hours = 0.0
+            leg_fuel_mt = 0.0
+            for p1, p2 in zip(path, path[1:]):
+                seg_dist = geo.geodesic_distance_nm(p1[0], p1[1], p2[0], p2[1])
+                if seg_dist <= 0.001:
+                    continue
+                mid_lat = (p1[0] + p2[0]) / 2.0
+                mid_lon = (p1[1] + p2[1]) / 2.0
+
+                # Sample currents & winds
+                u_curr = 0.35 + 0.15 * math.sin(math.radians(mid_lon)) if mid_lat < -50.0 else (0.25 * math.cos(math.radians(mid_lon)) + 0.10 if mid_lat > 50.0 else -0.30 if abs(mid_lat) < 15.0 else 0.20)
+                v_curr = 0.08 * math.cos(math.radians(mid_lon)) if mid_lat < -50.0 else (0.15 * math.sin(math.radians(mid_lon)) if mid_lat > 50.0 else 0.08 * math.sin(math.radians(mid_lat)))
+                u_wind = 11.5 + 2.5 * math.cos(math.radians(mid_lon)) if mid_lat < -40.0 else (7.5 + 1.8 * math.sin(math.radians(mid_lon)) if mid_lat > 30.0 else -6.5)
+                v_wind = -3.2 * math.sin(math.radians(mid_lon)) if mid_lat < -40.0 else (2.0 * math.cos(math.radians(mid_lon)) if mid_lat > 30.0 else (-2.5 if mid_lat > 0 else 2.5))
+
+                d_lat = p2[0] - p1[0]
+                d_lon = (p2[1] - p1[1]) * math.cos(math.radians(mid_lat))
+                norm = math.hypot(d_lat, d_lon) or 1.0
+                dir_x, dir_y = d_lon / norm, d_lat / norm
+
+                curr_along = (u_curr * dir_x + v_curr * dir_y) * 1.94384
+                wind_along = (u_wind * dir_x + v_wind * dir_y) * 1.94384
+
+                sog = max(2.0, speed_knots + curr_along + 0.03 * wind_along)
+                seg_h = seg_dist / sog
+                leg_hours += seg_h
+
+                v_water = max(4.0, speed_knots - curr_along - 0.02 * wind_along)
+                base_fuel_rate_h = 1.45 * ((v_water / 15.0) ** 3)  # MT per hour at design speed
+                leg_fuel_mt += base_fuel_rate_h * seg_h
+
+                total_curr_boost += curr_along
+                segment_count += 1
+
+            if not leg_hours:
+                leg_hours = dist / max(speed_knots, 1e-9)
+
             legs.append({
                 "from": a.to_dict(),
                 "to": b.to_dict(),
                 "path": [list(p) for p in path],
                 "distanceNm": round(dist, 1),
                 "distanceInEcaNm": round(eca, 1),
-                "durationHours": round(dist / max(speed_knots, 1e-9), 2),
+                "durationHours": round(leg_hours, 2),
+                "estimatedFuelTons": round(leg_fuel_mt, 1),
                 "crossings": crossing_list,
             })
             totals_nm += dist
             totals_eca += eca
+            total_hours += leg_hours
+            total_fuel_mt += leg_fuel_mt
+
             for c in crossing_list:
                 if c not in seen:
                     seen.add(c)
@@ -576,15 +679,23 @@ class RouteEngine:
                 if conc >= 15.0:
                     total_ice_nm += seg_dist
 
-        duration = totals_nm / max(speed_knots, 1e-9)
-        eta = departure_time_utc + timedelta(hours=duration)
+        eta = departure_time_utc + timedelta(hours=total_hours)
+        avg_curr_boost = round(total_curr_boost / max(1, segment_count), 1)
+
+        # Compute Safety Score (100 base)
+        safety_score = max(0, min(100, round(100.0 - 0.5 * max_ice_conc - (15.0 if totals_eca > 500 else 0.0))))
+
         return {
             "legs": legs,
             "totalDistanceNm": round(totals_nm, 1),
             "totalDistanceInEcaNm": round(totals_eca, 1),
             "totalDistanceInSeaIceNm": round(total_ice_nm, 1),
             "maxSeaIceConcentrationPct": round(max_ice_conc, 1),
-            "totalDurationHours": round(duration, 2),
+            "totalDurationHours": round(total_hours, 2),
+            "estimatedFuelTons": round(total_fuel_mt, 1),
+            "safetyScore": safety_score,
+            "currentAssistanceKnots": avg_curr_boost,
+            "optimizeFor": optimize_for,
             "etaUTC": eta.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "crossings": all_crossings,
             "vessel": {

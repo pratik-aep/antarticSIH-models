@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { fetchEcas, fetchChokepoints, fetchSeaIce, fetchOceanCurrents, fetchWind, geocode } from '../api'
+import { fetchEcas, fetchChokepoints, fetchSeaIce, fetchOceanCurrents, fetchWind, fetchWeatherHeatmap, geocode } from '../api'
 import { usePlanner } from '../store'
 import LayerControlPanel from './LayerControlPanel'
 import { unwrapLongitudes, splitIntoRenderedParts } from '../geo'
@@ -148,8 +148,8 @@ export default function MapView() {
   const {
     waypoints, addWaypoint, route, routeLoading,
     basemap, mapProjection, setMapProjection,
-    showEca, showChokepoints, showChevrons, showSeaIce, showOceanCurrents, showWind,
-    icebergs, sliderTimeISO, departureTimeUTC,
+    showEca, showChokepoints, showChevrons, showSeaIce, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, weatherSubFilters,
+    icebergs, routeWeather, shipWeatherAtSliderTime, closestApproaches, sliderTimeISO, departureTimeUTC,
   } = usePlanner()
 
   const addRef = useRef(addWaypoint)
@@ -160,6 +160,7 @@ export default function MapView() {
   const rawSeaIceRef = useRef(null)
   const rawCurrentsRef = useRef(null)
   const rawWindRef = useRef(null)
+  const rawWeatherHeatmapRef = useRef(null)
   const rawEcasRef = useRef(null)
   const rawChokepointsRef = useRef(null)
 
@@ -176,16 +177,78 @@ export default function MapView() {
     if (rawWindRef.current && map.getSource('wind')) {
       map.getSource('wind').setData(transformGeoJSON(rawWindRef.current, mapProjection))
     }
+    if (rawWeatherHeatmapRef.current && map.getSource('weather-heatmap')) {
+      map.getSource('weather-heatmap').setData(transformGeoJSON(rawWeatherHeatmapRef.current, mapProjection))
+    }
     if (rawEcasRef.current && map.getSource('ecas')) {
       map.getSource('ecas').setData(transformGeoJSON(rawEcasRef.current, mapProjection))
     }
     if (rawChokepointsRef.current && map.getSource('chokepoints')) {
       map.getSource('chokepoints').setData(transformGeoJSON(rawChokepointsRef.current, mapProjection))
     }
+    if (routeWeather && routeWeather.samples && map.getSource('storms-hazard')) {
+      const filteredSamples = routeWeather.samples.filter(s => {
+        if (!weatherSubFilters) return true
+        if (weatherSubFilters.hazards && s.hasHazard) return true
+        if (weatherSubFilters.storms && s.hasStorms) return true
+        if (weatherSubFilters.rain && s.hasRain) return true
+        if (weatherSubFilters.wind && s.hasWind) return true
+        if (weatherSubFilters.waves && s.hasWaves) return true
+        return false
+      })
+      const features = filteredSamples.map(s => {
+        const [tLon, tLat] = transformCoord(s.lon, s.lat, mapProjection)
+        return {
+          type: 'Feature',
+          properties: { ...s },
+          geometry: { type: 'Point', coordinates: [tLon, tLat] },
+        }
+      })
+      map.getSource('storms-hazard').setData({ type: 'FeatureCollection', features })
+    }
   }
 
   const syncRef = useRef(syncVectorLayers)
   syncRef.current = syncVectorLayers
+
+  const syncLayerVisibility = React.useCallback(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    const isPolar = mapProjection === 'arctic' || mapProjection === 'antarctic'
+
+    if (map.getLayer('sea-ice-fill')) {
+      map.setLayoutProperty('sea-ice-fill', 'visibility', showSeaIce ? 'visible' : 'none')
+    }
+    if (map.getLayer('ocean-currents-vectors')) {
+      map.setLayoutProperty('ocean-currents-vectors', 'visibility', showOceanCurrents ? 'visible' : 'none')
+    }
+    if (map.getLayer('wind-vectors')) {
+      map.setLayoutProperty('wind-vectors', 'visibility', showWind ? 'visible' : 'none')
+    }
+    if (map.getLayer('weather-heatmap-layer')) {
+      map.setLayoutProperty('weather-heatmap-layer', 'visibility', showWeatherHeatmap ? 'visible' : 'none')
+    }
+    if (map.getLayer('storms-hazard-layer-forecast')) {
+      map.setLayoutProperty('storms-hazard-layer-forecast', 'visibility', showStorms ? 'visible' : 'none')
+    }
+    if (map.getLayer('storms-hazard-layer-modeled')) {
+      map.setLayoutProperty('storms-hazard-layer-modeled', 'visibility', showStorms ? 'visible' : 'none')
+    }
+    if (map.getLayer('eca-outline') && map.getLayer('eca-fill')) {
+      map.setLayoutProperty('eca-fill', 'visibility', showEca && !isPolar ? 'visible' : 'none')
+      map.setLayoutProperty('eca-outline', 'visibility', showEca && !isPolar ? 'visible' : 'none')
+    }
+    if (map.getLayer('chokepoints')) {
+      map.setLayoutProperty('chokepoints', 'visibility', showChokepoints && !isPolar ? 'visible' : 'none')
+    }
+    if (map.getLayer('route-chevrons')) {
+      map.setLayoutProperty('route-chevrons', 'visibility', (showChevrons && !!route) ? 'visible' : 'none')
+    }
+  }, [showSeaIce, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, showEca, showChokepoints, showChevrons, mapProjection, route])
+
+  const syncVisibilityRef = useRef(syncLayerVisibility)
+  syncVisibilityRef.current = syncLayerVisibility
 
   // Always holds a fn drawing the *current* route into the map source
   const drawRouteRef = useRef(() => {})
@@ -327,9 +390,9 @@ export default function MapView() {
           'icon-size': ['interpolate', ['linear'], ['zoom'], 1, 0.35, 4, 0.55, 8, 0.8],
           'icon-rotate': ['get', 'dirDeg'],
           'icon-rotation-alignment': 'map',
-          'icon-allow-overlap': false,
-          'icon-ignore-placement': false,
-          'icon-padding': 8,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'icon-padding': 2,
         },
       })
 
@@ -343,9 +406,74 @@ export default function MapView() {
           'icon-size': ['interpolate', ['linear'], ['zoom'], 1, 0.35, 4, 0.55, 8, 0.8],
           'icon-rotate': ['get', 'dirDeg'],
           'icon-rotation-alignment': 'map',
-          'icon-allow-overlap': false,
-          'icon-ignore-placement': false,
-          'icon-padding': 8,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'icon-padding': 2,
+        },
+      })
+
+      map.addSource('weather-heatmap', { type: 'geojson', data: emptyFeatureCollection() })
+      map.addLayer({
+        id: 'weather-heatmap-layer',
+        type: 'heatmap',
+        source: 'weather-heatmap',
+        maxzoom: 12,
+        layout: { visibility: 'none' },
+        paint: {
+          'heatmap-weight': ['interpolate', ['linear'], ['get', 'riskIndex'], 0, 0, 100, 1],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 1, 9, 3],
+          'heatmap-color': [
+            'interpolate',
+            ['linear'],
+            ['heatmap-density'],
+            0, 'rgba(0, 0, 0, 0)',
+            0.2, 'rgba(59, 130, 246, 0.45)',
+            0.45, 'rgba(234, 179, 8, 0.65)',
+            0.75, 'rgba(249, 115, 22, 0.85)',
+            1.0, 'rgba(239, 68, 68, 0.95)'
+          ],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 14, 9, 40],
+          'heatmap-opacity': 0.75
+        }
+      })
+
+      map.addSource('storms-hazard', { type: 'geojson', data: emptyFeatureCollection() })
+      map.addLayer({
+        id: 'storms-hazard-layer-forecast',
+        type: 'circle',
+        source: 'storms-hazard',
+        filter: ['==', ['get', 'dataSource'], 'forecast'],
+        paint: {
+          'circle-radius': 7,
+          'circle-color': [
+            'match',
+            ['get', 'hazardLevel'],
+            'severe', '#ef4444',
+            'moderate', '#eab308',
+            '#22c55e'
+          ],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+          'circle-opacity': 0.9,
+        },
+      })
+      map.addLayer({
+        id: 'storms-hazard-layer-modeled',
+        type: 'circle',
+        source: 'storms-hazard',
+        filter: ['==', ['get', 'dataSource'], 'modeled_estimate'],
+        paint: {
+          'circle-radius': 6,
+          'circle-color': [
+            'match',
+            ['get', 'hazardLevel'],
+            'severe', '#f87171',
+            'moderate', '#fde047',
+            '#4ade80'
+          ],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#d97706',
+          'circle-opacity': 0.5,
         },
       })
 
@@ -356,6 +484,64 @@ export default function MapView() {
         offset: 10,
       })
       hoverPopupRef.current = vectorPopup
+
+      const registerStormHover = (layerId) => {
+        map.on('mousemove', layerId, (e) => {
+          if (!e.features || !e.features.length) return
+          map.getCanvas().style.cursor = 'pointer'
+          const feat = e.features[0]
+          const props = feat.properties || {}
+          const coords = feat.geometry.coordinates
+
+          const isForecast = props.dataSource === 'forecast'
+          const badgeClass = isForecast ? 'forecast' : 'modeled_estimate'
+          const badgeLabel = isForecast ? 'FORECAST' : 'MODELED ESTIMATE'
+          const hazardClass = props.hazardLevel || 'none'
+
+          const html = `
+            <div class="vector-popup-card wind">
+              <div class="vector-popup-header">
+                <div class="vector-title-box">
+                  <span class="vector-icon">⛈️</span>
+                  <span class="vector-title">Weather Sample</span>
+                </div>
+                <span class="vector-badge ${badgeClass}">${badgeLabel}</span>
+              </div>
+              <div class="vector-popup-grid">
+                <div class="vector-stat-box">
+                  <span class="stat-label">Wind Speed</span>
+                  <span class="stat-value"><strong>${props.windSpeedKn ?? '--'}</strong> kn</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Wind Gusts</span>
+                  <span class="stat-value"><strong>${props.windGustsKn ?? '--'}</strong> kn</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Wave Height</span>
+                  <span class="stat-value"><strong>${props.waveHeightM ?? '--'}</strong> m</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Hazard Level</span>
+                  <span class="stat-value"><strong class="hazard-tag ${hazardClass}">${(props.hazardLevel || 'none').toUpperCase()}</strong></span>
+                </div>
+                <div class="vector-stat-box full-row">
+                  <span class="stat-label">Timestamp (UTC)</span>
+                  <span class="stat-value">${(props.timestamp || '').replace('T', ' ').replace('Z', '')}</span>
+                </div>
+              </div>
+            </div>
+          `
+          vectorPopup.setLngLat(coords).setHTML(html).addTo(map)
+        })
+
+        map.on('mouseleave', layerId, () => {
+          map.getCanvas().style.cursor = ''
+          vectorPopup.remove()
+        })
+      }
+
+      registerStormHover('storms-hazard-layer-forecast')
+      registerStormHover('storms-hazard-layer-modeled')
 
       const registerVectorHover = (layerId, title, icon, cardClass) => {
         map.on('mousemove', layerId, (e) => {
@@ -419,6 +605,7 @@ export default function MapView() {
 
       drawRouteRef.current()
       syncRef.current()
+      syncVisibilityRef.current()
     })
 
     return () => {
@@ -690,53 +877,22 @@ export default function MapView() {
       syncRef.current()
     }).catch(() => {})
 
+    fetchWeatherHeatmap().then(fc => {
+      if (!alive) return
+      rawWeatherHeatmapRef.current = fc
+      syncRef.current()
+    }).catch(() => {})
+
     return () => { alive = false }
   }, [])
 
   useEffect(() => {
     syncVectorLayers()
-  }, [mapProjection, syncVectorLayers])
+  }, [mapProjection, routeWeather, weatherSubFilters, syncVectorLayers])
 
   useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.getLayer('sea-ice-fill')) return
-    map.setLayoutProperty('sea-ice-fill', 'visibility', showSeaIce ? 'visible' : 'none')
-  }, [showSeaIce])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.getLayer('ocean-currents-vectors')) return
-    map.setLayoutProperty('ocean-currents-vectors', 'visibility', showOceanCurrents ? 'visible' : 'none')
-  }, [showOceanCurrents])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.getLayer('wind-vectors')) return
-    map.setLayoutProperty('wind-vectors', 'visibility', showWind ? 'visible' : 'none')
-  }, [showWind])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.getLayer('eca-outline')) return
-    const isPolar = mapProjection === 'arctic' || mapProjection === 'antarctic'
-    map.setLayoutProperty('eca-fill', 'visibility', showEca && !isPolar ? 'visible' : 'none')
-    map.setLayoutProperty('eca-outline', 'visibility', showEca && !isPolar ? 'visible' : 'none')
-  }, [showEca, mapProjection])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.getLayer('chokepoints')) return
-    const isPolar = mapProjection === 'arctic' || mapProjection === 'antarctic'
-    map.setLayoutProperty('chokepoints', 'visibility', showChokepoints && !isPolar ? 'visible' : 'none')
-  }, [showChokepoints, mapProjection])
-
-  // ---- chevrons toggle ----
-  const chevronsVisible = showChevrons && !!route
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !map.getLayer('route-chevrons')) return
-    map.setLayoutProperty('route-chevrons', 'visibility', chevronsVisible ? 'visible' : 'none')
-  }, [chevronsVisible])
+    syncLayerVisibility()
+  }, [syncLayerVisibility])
 
   // ---- basemap switch ----
   useEffect(() => {
@@ -817,6 +973,56 @@ export default function MapView() {
       <div ref={containerRef} className="map" />
       
       <LayerControlPanel />
+
+      {route && (showStorms || (showSeaIce && icebergs.length > 0)) && (
+        <div className="live-hud-card">
+          <div className="hud-title">
+            Live Route Conditions & ETA Timeline ({new Date(sliderTimeISO || departureTimeUTC).toUTCString().slice(0, 22)})
+          </div>
+          <div className="hud-grid">
+            {showStorms && shipWeatherAtSliderTime && (
+              <div className="hud-section storm-section">
+                <div className="hud-header">
+                  <span>⛈️ Sea & Weather</span>
+                  <span className={`hud-badge ${shipWeatherAtSliderTime.dataSource}`}>
+                    {shipWeatherAtSliderTime.dataSource === 'forecast' ? 'Forecast' : 'Modeled Estimate'}
+                  </span>
+                </div>
+                <div className="hud-row">
+                  <span className="lbl">Wind:</span>
+                  <span className="val"><strong>{shipWeatherAtSliderTime.windSpeedKn}</strong> kn (gusts {shipWeatherAtSliderTime.windGustsKn} kn)</span>
+                </div>
+                <div className="hud-row">
+                  <span className="lbl">Wave Height:</span>
+                  <span className="val"><strong>{shipWeatherAtSliderTime.waveHeightM}</strong> m</span>
+                </div>
+                <div className="hud-row">
+                  <span className="lbl">Hazard Tier:</span>
+                  <span className={`val hazard-tag ${shipWeatherAtSliderTime.hazardLevel}`}>
+                    {shipWeatherAtSliderTime.hazardLevel.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            )}
+            {showSeaIce && closestApproaches.length > 0 && (
+              <div className="hud-section ice-section">
+                <div className="hud-header">
+                  <span>🧊 Nearest Iceberg</span>
+                  <span className="hud-badge info">Tracked</span>
+                </div>
+                <div className="hud-row">
+                  <span className="lbl">Iceberg:</span>
+                  <span className="val"><strong>{closestApproaches[0].icebergName}</strong></span>
+                </div>
+                <div className="hud-row">
+                  <span className="lbl">Min Distance:</span>
+                  <span className="val"><strong>{closestApproaches[0].minDistanceNm}</strong> NM</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="map-projection-bar">
         {[

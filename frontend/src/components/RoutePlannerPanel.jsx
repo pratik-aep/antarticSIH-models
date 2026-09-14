@@ -87,8 +87,10 @@ function PlannerTab() {
           value={optimizeFor}
           onChange={(e) => setOptimizeFor(e.target.value)}
         >
-          <option value="distance">Shortest distance</option>
-          <option value="time" disabled>Fastest (needs weather/currents) — phase 2</option>
+          <option value="distance">📏 Shortest distance</option>
+          <option value="time">⚡ Fastest (Weather & Currents)</option>
+          <option value="fuel">⛽ Most fuel efficient</option>
+          <option value="safety">🛡️ Maximum safety (Extreme Weather Avoidance)</option>
         </select>
       </section>
 

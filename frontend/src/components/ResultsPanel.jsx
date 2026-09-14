@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
-import { MapPin, Ship, Navigation, Play, Pause, AlertTriangle, Clock } from 'lucide-react'
-import { fmtHours } from '../utils'
+import { MapPin, Ship, Navigation, Play, Pause, AlertTriangle, Clock, CloudLightning } from 'lucide-react'
+import { fmtHours, formatCoord } from '../utils'
 import { usePlanner } from '../store'
 
 function Row({ label, value, sub, icon }) {
@@ -21,7 +21,7 @@ export default function ResultsPanel({ route, loading, error }) {
     departureTimeUTC,
     sliderTimeISO, setSliderTimeISO,
     isPlaying, setIsPlaying,
-    closestApproaches,
+    closestApproaches, routeWeather,
   } = usePlanner()
 
   const startMs = new Date(departureTimeUTC).getTime()
@@ -31,6 +31,11 @@ export default function ResultsPanel({ route, loading, error }) {
   const currentMs = sliderTimeISO ? new Date(sliderTimeISO).getTime() : startMs
   const elapsedHours = Math.max(0, Math.min(totalHours, (currentMs - startMs) / 3600000))
   const progressPct = Math.round((elapsedHours / totalHours) * 100) || 0
+
+  const weatherWarnings = React.useMemo(() => {
+    if (!routeWeather || !routeWeather.samples) return []
+    return routeWeather.samples.filter(s => s.hazardLevel === 'severe' || s.hazardLevel === 'moderate').slice(0, 4)
+  }, [routeWeather])
 
   useEffect(() => {
     let timer = null
@@ -101,6 +106,15 @@ export default function ResultsPanel({ route, loading, error }) {
       <Row icon={<Ship size={15} />} label="Distance" value={`${route.totalDistanceNm.toLocaleString()} nm`} sub="total geodesic" />
       <Row icon={<MapPin size={15} />} label="Distance in ECA" value={route.totalDistanceInEcaNm ? `${route.totalDistanceInEcaNm.toLocaleString()} nm` : '0 nm'} sub={route.totalDistanceInEcaNm ? 'Emission control areas' : undefined} />
       <Row icon={<span style={{ fontSize: 13 }}>🧊</span>} label="Distance in Sea Ice" value={route.totalDistanceInSeaIceNm ? `${route.totalDistanceInSeaIceNm.toLocaleString()} nm` : '0 nm'} sub={route.maxSeaIceConcentrationPct ? `Max conc: ${route.maxSeaIceConcentrationPct}%` : 'Open water'} />
+      {route.estimatedFuelTons !== undefined && (
+        <Row icon={<span style={{ fontSize: 13 }}>⛽</span>} label="Estimated Fuel Burn" value={`${route.estimatedFuelTons.toLocaleString()} MT`} sub="Metric tons HFO/MGO" />
+      )}
+      {route.safetyScore !== undefined && (
+        <Row icon={<span style={{ fontSize: 13 }}>🛡️</span>} label="Safety Score" value={`${route.safetyScore} / 100`} sub={route.safetyScore >= 80 ? 'Optimal Clearance' : route.safetyScore >= 50 ? 'Moderate Clearance' : 'High Risk Hazard'} />
+      )}
+      {route.currentAssistanceKnots !== undefined && (
+        <Row icon={<span style={{ fontSize: 13 }}>🌊</span>} label="Current Assistance" value={`${route.currentAssistanceKnots >= 0 ? '+' : ''}${route.currentAssistanceKnots} kn`} sub="Ocean current net boost" />
+      )}
       <Row icon={<Navigation size={15} />} label="Duration" value={fmtHours(route.totalDurationHours)} />
       <div className="res-row">
         <span className="res-icon">🕒</span>
@@ -152,6 +166,27 @@ export default function ResultsPanel({ route, loading, error }) {
               <span className="ca-value">
                 <strong>{app.minDistanceNm} nm</strong>
                 <em>{new Date(app.timeISO).toLocaleString('en-GB', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'short' })} UTC</em>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {weatherWarnings && weatherWarnings.length > 0 && (
+        <div className="closest-approach-box" style={{ background: '#fff7ed', borderColor: '#fed7aa' }}>
+          <div className="ca-title" style={{ color: '#c2410c' }}>
+            <CloudLightning size={14} className="ca-icon" /> Route Weather Hazards
+          </div>
+          {weatherWarnings.map((w, idx) => (
+            <div key={idx} className="ca-item" style={{ borderBottomColor: '#ffedd5' }}>
+              <span className="ca-name">
+                {w.hazardLevel === 'severe' ? '🔴' : '🟡'} {w.windSpeedKn >= 34 ? 'Gale' : w.waveHeightM >= 4 ? 'Rough seas' : 'Moderate weather'} near {formatCoord(w.lat, w.lon)}
+              </span>
+              <span className="ca-value">
+                <strong>{w.windSpeedKn} kn / {w.waveHeightM} m</strong>
+                <em style={{ color: '#9a3412' }}>
+                  Day {Math.floor(w.elapsedHours / 24) + 1} ({w.dataSource === 'forecast' ? 'forecast' : 'modeled estimate — beyond forecast range'})
+                </em>
               </span>
             </div>
           ))}

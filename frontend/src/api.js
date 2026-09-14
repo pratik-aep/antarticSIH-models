@@ -67,3 +67,17 @@ export async function fetchWind() {
   const res = await fetch(`${API_BASE}/wind`)
   return json(res)
 }
+
+export async function fetchWeatherHeatmap() {
+  const res = await fetch(`${API_BASE}/weather-heatmap`)
+  return json(res)
+}
+
+export async function fetchRouteWeather(routeId = '', departureTime = '', speedKnots = 15) {
+  const params = new URLSearchParams()
+  if (routeId) params.set('routeId', routeId)
+  if (departureTime) params.set('departureTime', departureTime)
+  if (speedKnots) params.set('speedKnots', String(speedKnots))
+  const res = await fetch(`${API_BASE}/route-weather?${params.toString()}`)
+  return json(res)
+}

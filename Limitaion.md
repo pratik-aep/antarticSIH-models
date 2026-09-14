@@ -25,3 +25,14 @@ Diagnosis is still open: whichever it is (or both) should be confirmed by compar
 **Why this needs to be revisited before/alongside iceberg detection:** land-clipping is a cosmetic and minor-distance-accuracy problem today. Once iceberg/ice-edge avoidance is added, the same underlying weakness — a routing grid or smoothing pass that can cut corners past a boundary it's supposed to respect — becomes a safety-relevant precision problem instead of a cosmetic one. An ice-edge boundary should not be treated as more forgiving than a coastline; if anything it needs tighter tolerance, since ice edges (unlike a coastline) can shift and the "penalty" for cutting a corner is a real hazard rather than a slightly-off distance figure.
 
 **Recommendation:** whatever fix approach is chosen for the land-clipping issue (finer grid at known chokepoints, land-polygon buffering, or post-smoothing re-validation against land) should be built as a general "respect a hard boundary" mechanism, not a special case for coastlines — so the same mechanism can be reused for the ice-edge boundary when that feature is built, rather than solving this twice.
+
+---
+
+## Weather & Hazard Display vs. Active Dynamic Optimization
+
+**What happens:** The system displays weather conditions, storms, sea ice, and severe hazards along the calculated route (showing the exact date and time the vessel will encounter them). However, it does **not** actively optimize or dynamically alter the route to avoid these moving temporal hazards during route calculation.
+
+**Details:**
+- **Timeline Hazard Inspection:** The route timeline and weather engine sample and show forecasted weather metadata (wind speed/heading, wave height, rain, storms, severe hazards) at specific points along the route corresponding to the vessel's expected date and time of arrival.
+- **Lack of Active Spatio-Temporal Avoidance:** The A* routing engine optimizes spatial distance and cost penalties (e.g. sea ice density), but does not execute a 4D spatio-temporal dynamic optimization to actively detour around transient moving storm fronts over time.
+- **User Impact:** The planner alerts users to *where* and *when* hazards will occur along their voyage, but the path finder does not automatically reroute around temporary weather fronts unless manually guided via waypoints or static cost weightings.

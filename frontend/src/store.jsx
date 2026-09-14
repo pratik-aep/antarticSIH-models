@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react'
-import { computeRoute, fetchIcebergs } from './api'
-import { computeClosestApproaches } from './utils'
+import { computeRoute, fetchIcebergs, fetchRouteWeather } from './api'
+import { computeClosestApproaches, getShipPositionAtTime } from './utils'
 
 const PlannerContext = createContext(null)
 
@@ -47,12 +47,26 @@ export function PlannerProvider({ children }) {
   const [showSeaIce, setShowSeaIce] = useState(true)
   const [showOceanCurrents, setShowOceanCurrents] = useState(true)
   const [showWind, setShowWind] = useState(false)
+  const [showWeatherHeatmap, setShowWeatherHeatmap] = useState(false)
+  const [showStorms, setShowStorms] = useState(true)
+  const [weatherSubFilters, setWeatherSubFilters] = useState({
+    wind: true,
+    waves: true,
+    storms: true,
+    rain: true,
+    hazards: true,
+  })
+
+  const toggleWeatherSubFilter = useCallback((key) => {
+    setWeatherSubFilters(prev => ({ ...prev, [key]: !prev[key] }))
+  }, [])
 
   const [route, setRoute] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeError, setRouteError] = useState(null)
 
   const [icebergs, setIcebergs] = useState([])
+  const [routeWeather, setRouteWeather] = useState(null)
   const [sliderTimeISO, setSliderTimeISO] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
 
@@ -95,6 +109,7 @@ export function PlannerProvider({ children }) {
       setRoute(null)
       setRouteError(null)
       setIcebergs([])
+      setRouteWeather(null)
       return
     }
 
@@ -135,6 +150,14 @@ export function PlannerProvider({ children }) {
           } catch {
             if (active) setIcebergs([])
           }
+
+          // Fetch Open-Meteo route weather and fallback estimates
+          try {
+            const rw = await fetchRouteWeather(res.routeId || '', departureTimeUTC, speedKnots)
+            if (active) setRouteWeather(rw)
+          } catch {
+            if (active) setRouteWeather(null)
+          }
         }
       } catch (err) {
         if (active) {
@@ -142,6 +165,7 @@ export function PlannerProvider({ children }) {
           setRouteError(err instanceof Error ? err.message : 'Routing failed')
           setRouteLoading(false)
           setIcebergs([])
+          setRouteWeather(null)
         }
       }
     }
@@ -154,6 +178,50 @@ export function PlannerProvider({ children }) {
     if (!route || !icebergs.length) return []
     return computeClosestApproaches(route, departureTimeUTC, icebergs)
   }, [route, departureTimeUTC, icebergs])
+
+  // Interpolated ship weather conditions at current sliderTimeISO
+  const shipWeatherAtSliderTime = useMemo(() => {
+    if (!routeWeather || !routeWeather.samples || !routeWeather.samples.length || !sliderTimeISO || !departureTimeUTC) {
+      return null
+    }
+    const targetMs = new Date(sliderTimeISO).getTime()
+    const samples = routeWeather.samples
+
+    const t0Ms = new Date(samples[0].timestamp).getTime()
+    if (targetMs <= t0Ms) return samples[0]
+
+    const tEndMs = new Date(samples[samples.length - 1].timestamp).getTime()
+    if (targetMs >= tEndMs) return samples[samples.length - 1]
+
+    for (let i = 0; i < samples.length - 1; i++) {
+      const s1 = samples[i]
+      const s2 = samples[i + 1]
+      const t1 = new Date(s1.timestamp).getTime()
+      const t2 = new Date(s2.timestamp).getTime()
+      if (targetMs >= t1 && targetMs <= t2) {
+        const frac = t2 > t1 ? (targetMs - t1) / (t2 - t1) : 0
+        const wind = round1(s1.windSpeedKn + frac * (s2.windSpeedKn - s1.windSpeedKn))
+        const gusts = round1(s1.windGustsKn + frac * (s2.windGustsKn - s1.windGustsKn))
+        const wave = round1(s1.waveHeightM + frac * (s2.waveHeightM - s1.waveHeightM))
+        const source = (s1.dataSource === 'modeled_estimate' || s2.dataSource === 'modeled_estimate')
+          ? 'modeled_estimate'
+          : 'forecast'
+        const hazard = (wind >= 34 || gusts >= 40 || wave >= 5.0) ? 'severe' : (wind >= 22 || wave >= 3.0) ? 'moderate' : 'none'
+        return {
+          lat: round4(s1.lat + frac * (s2.lat - s1.lat)),
+          lon: round4(s1.lon + frac * (s2.lon - s1.lon)),
+          timestamp: sliderTimeISO,
+          windSpeedKn: wind,
+          windGustsKn: gusts,
+          waveHeightM: wave,
+          weatherCode: s1.weatherCode,
+          hazardLevel: hazard,
+          dataSource: source,
+        }
+      }
+    }
+    return samples[samples.length - 1]
+  }, [routeWeather, sliderTimeISO, departureTimeUTC])
 
   const value = useMemo(() => ({
     waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint,
@@ -171,16 +239,23 @@ export function PlannerProvider({ children }) {
     showSeaIce, setShowSeaIce,
     showOceanCurrents, setShowOceanCurrents,
     showWind, setShowWind,
+    showWeatherHeatmap, setShowWeatherHeatmap,
+    showStorms, setShowStorms,
+    weatherSubFilters, toggleWeatherSubFilter,
     route, routeLoading, routeError,
-    icebergs,
+    icebergs, routeWeather,
     sliderTimeISO, setSliderTimeISO,
     isPlaying, setIsPlaying,
-    closestApproaches,
+    closestApproaches, shipWeatherAtSliderTime,
     valid,
   }), [waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint, speedKnots,
        departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, mapProjection,
        basemap, showEca, showChokepoints, showChevrons, showSeaIce, showOceanCurrents, showWind,
-       route, routeLoading, routeError, icebergs, sliderTimeISO, isPlaying, closestApproaches, valid])
+       showWeatherHeatmap, showStorms, weatherSubFilters, toggleWeatherSubFilter, route, routeLoading, routeError, icebergs, routeWeather,
+       sliderTimeISO, isPlaying, closestApproaches, shipWeatherAtSliderTime, valid])
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>
 }
+
+function round1(val) { return Math.round(val * 10) / 10 }
+function round4(val) { return Math.round(val * 10000) / 10000 }

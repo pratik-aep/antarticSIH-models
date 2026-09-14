@@ -107,3 +107,63 @@ def wind_geojson() -> dict:
         "type": "FeatureCollection",
         "features": features,
     }
+
+
+def weather_heatmap_geojson() -> dict:
+    """Return GeoJSON representation of Extreme Weather Risk Index (0-100) grid.
+
+    Synthesizes temperature drops, surface wind gale force drag, ocean current shear,
+    and polar icing conditions into a continuous spatial hazard field.
+    """
+    features = []
+    lats = np.arange(-80.0, 80.0, 3.5)
+    lons = np.arange(-180.0, 180.0, 5.0)
+
+    for la in lats:
+        for lo in lons:
+            # Wind speed component
+            if la < -40.0:
+                u_w, v_w = 11.5 + 2.5 * math.cos(math.radians(lo)), -3.2 * math.sin(math.radians(lo))
+            elif la > 30.0:
+                u_w, v_w = 7.5 + 1.8 * math.sin(math.radians(lo)), 2.0 * math.cos(math.radians(lo))
+            else:
+                u_w, v_w = -6.5, -2.5 if la > 0 else 2.5
+            wind_knots = math.hypot(u_w, v_w) * 1.94384
+
+            # Current speed component
+            if la < -50.0:
+                u_c, v_c = 0.35 + 0.15 * math.sin(math.radians(lo)), 0.08 * math.cos(math.radians(lo))
+            elif la > 50.0:
+                u_c, v_c = 0.25 * math.cos(math.radians(lo)) + 0.10, 0.15 * math.sin(math.radians(lo))
+            else:
+                u_c, v_c = -0.30 if abs(la) < 15.0 else 0.20, 0.08 * math.sin(math.radians(la))
+            curr_knots = math.hypot(u_c, v_c) * 1.94384
+
+            # Polar temperature / icing risk
+            polar_icing = max(0.0, (abs(la) - 55.0) * 2.5) if abs(la) > 55.0 else 0.0
+
+            # Combined risk index formula (0 - 100)
+            wind_risk = min(50.0, max(0.0, (wind_knots - 8.0) * 2.2))
+            curr_risk = min(20.0, curr_knots * 12.0)
+            risk_index = round(min(100.0, max(0.0, wind_risk + curr_risk + polar_icing)), 1)
+
+            if risk_index > 5.0:
+                category = "extreme" if risk_index >= 70.0 else "high" if risk_index >= 45.0 else "moderate" if risk_index >= 25.0 else "low"
+                features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "riskIndex": risk_index,
+                        "category": category,
+                        "windKnots": round(wind_knots, 1),
+                        "currentKnots": round(curr_knots, 1),
+                    },
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [float(lo), float(la)],
+                    },
+                })
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+    }

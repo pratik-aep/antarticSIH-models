@@ -8,13 +8,16 @@ export default function LayerControlPanel() {
     showSeaIce, setShowSeaIce,
     showOceanCurrents, setShowOceanCurrents,
     showWind, setShowWind,
+    showWeatherHeatmap, setShowWeatherHeatmap,
+    showStorms, setShowStorms,
+    weatherSubFilters, toggleWeatherSubFilter,
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
   } = usePlanner()
 
   const activeCount = [
-    showSeaIce, showOceanCurrents, showWind,
+    showSeaIce, showOceanCurrents, showWind, showWeatherHeatmap, showStorms,
     showEca, showChokepoints, showChevrons
   ].filter(Boolean).length
 
@@ -44,6 +47,8 @@ export default function LayerControlPanel() {
                   setShowSeaIce(true)
                   setShowOceanCurrents(true)
                   setShowWind(true)
+                  setShowWeatherHeatmap(true)
+                  setShowStorms(true)
                   setShowEca(true)
                   setShowChokepoints(true)
                   setShowChevrons(true)
@@ -58,6 +63,8 @@ export default function LayerControlPanel() {
                   setShowSeaIce(false)
                   setShowOceanCurrents(false)
                   setShowWind(false)
+                  setShowWeatherHeatmap(false)
+                  setShowStorms(false)
                   setShowEca(false)
                   setShowChokepoints(false)
                   setShowChevrons(false)
@@ -133,6 +140,41 @@ export default function LayerControlPanel() {
                 onChange={(e) => setShowChokepoints(e.target.checked)}
               />
             </label>
+
+            <div className="layer-item-group">
+              <label className="layer-item">
+                <span className="layer-item-icon wind" style={{ background: '#fef2f2', color: '#dc2626' }}>⛈️</span>
+                <span className="layer-item-info">
+                  <span className="layer-name">Storms & Weather</span>
+                  <span className="layer-sub">Open-Meteo live hazard forecast</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showStorms}
+                  onChange={(e) => setShowStorms(e.target.checked)}
+                />
+              </label>
+              {showStorms && (
+                <div className="weather-sub-filters">
+                  {[
+                    ['wind', '💨 Wind'],
+                    ['waves', '🌊 Waves'],
+                    ['storms', '⚡ Storms'],
+                    ['rain', '🌧️ Rain'],
+                    ['hazards', '🔴 Severe'],
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`sub-filter-chip ${weatherSubFilters[key] ? 'active' : ''}`}
+                      onClick={() => toggleWeatherSubFilter(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <label className="layer-item">
               <span className="layer-item-icon chevrons">➢</span>

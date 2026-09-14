@@ -65,14 +65,14 @@ def _parse_departure(raw: str) -> datetime:
     return dt
 
 
+import uuid
+from .weather_engine import get_route_weather
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = Datastore()
     mask = LandMask()
-    # The 0.5° land grid erases real narrow straits (Dardanelles, Palk …) and
-    # every artificial waterway, splitting otherwise-connected seas. Re-open a
-    # chain corridor along the same chokepoint / canal reference lines used for
-    # crossing detection so the graph and the render line stay connected.
     for cp in store.chokepoints:
         if cp["kind"] == "strait" and cp["line"]:
             mask.carve_water([(lat, lon) for lon, lat in cp["line"]])
@@ -81,6 +81,7 @@ async def lifespan(app: FastAPI):
     engine = RouteEngine(mask, store.ecas, store.chokepoints, waterways=store.waterways)
     app.state.datastore = store
     app.state.engine = engine
+    app.state.routes = {}
     app.state.booted = True
     print("[api] ready", flush=True)
     yield
@@ -109,7 +110,7 @@ async def compute_route(req: RouteRequest):
         raise HTTPException(503, "route engine not ready")
     dep = _parse_departure(req.departureTimeUTC)
     try:
-        return engine.compute_route(
+        res = engine.compute_route(
             [w for w in req.waypoints],
             speed_knots=req.speedKnots,
             departure_time_utc=dep,
@@ -118,8 +119,39 @@ async def compute_route(req: RouteRequest):
             draft_meters=req.draftMeters,
             ice_class=req.iceClass,
         )
+        route_id = str(uuid.uuid4())
+        res["routeId"] = route_id
+        res["departureTimeUTC"] = dep.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if hasattr(app.state, "routes"):
+            app.state.routes[route_id] = res
+            # Keep cache bounded to 50 routes
+            if len(app.state.routes) > 50:
+                oldest_key = next(iter(app.state.routes))
+                app.state.routes.pop(oldest_key, None)
+        return res
     except RouteError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/route-weather")
+async def route_weather(
+    routeId: str = Query(default=""),
+    departureTime: str = Query(default=""),
+    speedKnots: float = Query(default=15.0),
+):
+    dep = _parse_departure(departureTime)
+    routes_cache = getattr(app.state, "routes", {})
+    route_obj = routes_cache.get(routeId)
+    
+    if not route_obj:
+        if not routeId and len(routes_cache) > 0:
+            # Fall back to most recent computed route
+            route_obj = list(routes_cache.values())[-1]
+
+    if not route_obj:
+        return {"samples": []}
+
+    return get_route_weather(route_obj, dep)
 
 
 from .iceberg_engine import get_all_icebergs_with_trajectories
@@ -176,3 +208,9 @@ async def ocean_currents():
 async def wind():
     from .environment_layers import wind_geojson
     return wind_geojson()
+
+
+@app.get("/api/weather-heatmap")
+async def weather_heatmap():
+    from .environment_layers import weather_heatmap_geojson
+    return weather_heatmap_geojson()
