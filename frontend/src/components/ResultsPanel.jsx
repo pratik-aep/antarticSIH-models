@@ -1,6 +1,7 @@
-import React from 'react'
-import { MapPin, Ship, Navigation } from 'lucide-react'
+import React, { useEffect } from 'react'
+import { MapPin, Ship, Navigation, Play, Pause, AlertTriangle, Clock } from 'lucide-react'
 import { fmtHours } from '../utils'
+import { usePlanner } from '../store'
 
 function Row({ label, value, sub, icon }) {
   return (
@@ -15,7 +16,40 @@ function Row({ label, value, sub, icon }) {
   )
 }
 
-export default function ResultsPanel({ route, loading, error, waypoints }) {
+export default function ResultsPanel({ route, loading, error }) {
+  const {
+    departureTimeUTC,
+    sliderTimeISO, setSliderTimeISO,
+    isPlaying, setIsPlaying,
+    closestApproaches,
+  } = usePlanner()
+
+  const startMs = new Date(departureTimeUTC).getTime()
+  const totalHours = route ? route.totalDurationHours : 1
+  const endMs = startMs + totalHours * 3600000
+
+  const currentMs = sliderTimeISO ? new Date(sliderTimeISO).getTime() : startMs
+  const elapsedHours = Math.max(0, Math.min(totalHours, (currentMs - startMs) / 3600000))
+  const progressPct = Math.round((elapsedHours / totalHours) * 100) || 0
+
+  useEffect(() => {
+    let timer = null
+    if (isPlaying && route) {
+      timer = setInterval(() => {
+        setSliderTimeISO(prev => {
+          const curr = prev ? new Date(prev).getTime() : startMs
+          const next = curr + 0.5 * 3600000 // 30-min step per tick
+          if (next >= endMs) {
+            setIsPlaying(false)
+            return new Date(endMs).toISOString()
+          }
+          return new Date(next).toISOString()
+        })
+      }, 150)
+    }
+    return () => clearInterval(timer)
+  }, [isPlaying, route, startMs, endMs, setSliderTimeISO, setIsPlaying])
+
   if (error) {
     return (
       <div className="results results-error">
@@ -42,6 +76,12 @@ export default function ResultsPanel({ route, loading, error, waypoints }) {
   const places = route.legs.map(l => l.from.label)
   places.push(route.legs[route.legs.length - 1].to.label)
 
+  function handleSliderChange(e) {
+    const hours = Number(e.target.value)
+    const target = new Date(startMs + hours * 3600000).toISOString()
+    setSliderTimeISO(target)
+  }
+
   return (
     <div className="results">
       <div className="res-title">Route</div>
@@ -66,6 +106,56 @@ export default function ResultsPanel({ route, loading, error, waypoints }) {
         <span className="res-label">Estimated arrival (UTC)</span>
         <span className="res-value">{new Date(route.etaUTC).toLocaleString('en-GB', { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' })} UTC</span>
       </div>
+
+      <div className="voyage-slider-section">
+        <div className="slider-header">
+          <button
+            type="button"
+            className="play-btn"
+            onClick={() => setIsPlaying(!isPlaying)}
+            title={isPlaying ? 'Pause simulation' : 'Play voyage simulation'}
+          >
+            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+          </button>
+          <div className="slider-time-info">
+            <span className="slider-time-label">
+              <Clock size={12} /> {new Date(sliderTimeISO || departureTimeUTC).toLocaleString('en-GB', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'short' })} UTC
+            </span>
+            <span className="slider-pct">{progressPct}%</span>
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={totalHours}
+          step={0.25}
+          value={elapsedHours}
+          onChange={handleSliderChange}
+          className="voyage-slider"
+        />
+        <div className="slider-ticks">
+          <span>Dep</span>
+          <span>+{Math.round(totalHours / 2)}h</span>
+          <span>ETA</span>
+        </div>
+      </div>
+
+      {closestApproaches && closestApproaches.length > 0 && (
+        <div className="closest-approach-box">
+          <div className="ca-title">
+            <AlertTriangle size={14} className="ca-icon" /> Iceberg Closest Approach
+          </div>
+          {closestApproaches.map(app => (
+            <div key={app.icebergId} className="ca-item">
+              <span className="ca-name">🔺 {app.icebergName}</span>
+              <span className="ca-value">
+                <strong>{app.minDistanceNm} nm</strong>
+                <em>{new Date(app.timeISO).toLocaleString('en-GB', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'short' })} UTC</em>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="res-row crossing-row">
         <span className="res-icon">⛵</span>

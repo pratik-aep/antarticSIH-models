@@ -43,3 +43,12 @@ export async function fetchChokepoints() {
   const res = await fetch(`${API_BASE}/chokepoints`)
   return json(res)
 }
+
+export async function fetchIcebergs(startTime = '', endTime = '', stepHours = 1.0) {
+  const params = new URLSearchParams()
+  if (startTime) params.set('startTime', startTime)
+  if (endTime) params.set('endTime', endTime)
+  if (stepHours) params.set('stepHours', String(stepHours))
+  const res = await fetch(`${API_BASE}/icebergs?${params.toString()}`)
+  return json(res)
+}

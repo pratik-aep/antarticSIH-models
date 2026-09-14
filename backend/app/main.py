@@ -122,6 +122,9 @@ async def compute_route(req: RouteRequest):
         raise HTTPException(422, str(exc)) from exc
 
 
+from .iceberg_engine import get_all_icebergs_with_trajectories
+
+
 @app.get("/api/ports")
 async def search_ports(q: str = Query(default="", max_length=64)):
     return app.state.datastore.search_ports(q)
@@ -140,3 +143,18 @@ async def ecas():
 @app.get("/api/chokepoints")
 async def chokepoints():
     return app.state.datastore.chokepoints_geojson()
+
+
+@app.get("/api/icebergs")
+async def icebergs(
+    startTime: str = Query(default=""),
+    endTime: str = Query(default=""),
+    stepHours: float = Query(default=1.0, gt=0, le=24),
+):
+    from datetime import timedelta
+    dep_start = _parse_departure(startTime)
+    if endTime:
+        dep_end = _parse_departure(endTime)
+    else:
+        dep_end = dep_start + timedelta(days=7)
+    return get_all_icebergs_with_trajectories(dep_start, dep_end, step_hours=stepHours)

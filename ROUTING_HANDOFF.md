@@ -1,8 +1,8 @@
 # Routing Algorithm — Handoff Document
 
 Owner-oriented write-up for anyone continuing work on the sea-route planner.
-Covers the pipeline, the A* engine, the post-processing, data files, operations,
-testing, known gotchas and open items. Read this before touching anything.
+Covers the pipeline, the A* engine, post-processing, data files, operations,
+testing, known gotchas, open items, and an **exhaustive file-by-file developer blueprint** for algorithm improvements. Read this before touching anything.
 
 ---
 
@@ -111,37 +111,28 @@ waterway midline, **then** builds the engine. Order matters — carve before
 ### Three hard constraints in the neighbour loop
 1. **Arctic ice cap**: no cells north of `nav_top_lat = 78°` — the graph is
    simply not navigable above it, so the model can't cheat a transpolar
-   shortcut between Atlantic and Pacific.
+   shortcut between Atlantic and Pacific. (Bypassed for polar/icebreaker vessels).
 2. **Arctic meander penalty**: cells above `arctic_pen_lat = 65°` (northern
    hemisphere only) get `+ 0.2 * d² nm` added to edge cost, so far-north
    meanders lose to low-latitude shipping lanes but genuine high-latitude
-   routes (e.g. Antarctic legs are unpenalised) still work.
-3. **Diagonal land-corner rule** (added after a real bug): a diagonal move
-   from `(r,c)` to `(r±1,c±1)` passes through the shared corner of a 4-cell
-   block. If **either** axis-adjacent cell is land, the move is rejected —
-   the geodesic between the two centres would clip that land corner. The rule
-   must check **either** (not "both"); the older "both" variant still allowed
-   diagonal grazes of a coast and produced `A* centers land-free: False` on
-   legs threading the Japanese archipelago (see §Known bugs).
+   routes still work.
+3. **Diagonal land-corner rule**: a diagonal move from `(r,c)` to `(r±1,c±1)`
+   passes through the shared corner of a 4-cell block. If **either** axis-adjacent
+   cell is land, the move is rejected — the geodesic between the two centres
+   would clip that land corner.
 
 Every returned A* centerline is guaranteed land-free by construction for these
-3 rules; `_check_free(centers)` is the regression guard.
+rules; `_check_free(centers)` is the regression guard.
 
 ### Waterway shortcut edges (artificial canals)
 `GridRouter(mask, waterways=())` builds one bidirectional shortcut edge per
 waterway:
-- endpoints `nearest_water(from)`, `nearest_water(to)` (`max_radius=8`); skipped
-  with a log line if they land on the same cell or have no near water.
+- endpoints `nearest_water(from)`, `nearest_water(to)` (`max_radius=8`).
 - cost = `polyline_length_nm(midline) * NM_TO_M` — the **real** canal+gulf
   length, in metres, matched to the metre-valued grid edges.
 - `waterway_lines[(iA,iB)]` keeps the midline so that when the search chooses
   that edge, the canonical midline (`midline[1:-1]`) is **spliced into the
-  returned polyline** at reconstruction. Rendering, crossing detection and ECA
-  then all see the actual canal geometry instead of a straight grid hop.
-
-`build_waterway_midline(w, step_nm=6.0)` chains `from → via… → to` into a dense
-geodesic polyline used for the edge cost, the splice geometry, and the mask
-carve.
+  returned polyline** at reconstruction.
 
 ---
 
@@ -149,54 +140,21 @@ carve.
 
 - `_douglas_peucker(pts, eps=1.1)` — collapse the A* staircase to a corridor.
 - `_shortcut_water` / `_safe_shortcut` — greedy merge of collinear water
-  segments into geodesic jumps; validation re-checks **both** that the jump
-  never enters a land cell and never goes north of `max_north_lat=78`.
-  `_safe_shortcut` samples at `0.6 * SPACING` (≈ 0.3 nm) — very conservative.
-- `_ensure_safe(pts, original_path, mask)` — for each consecutive pair whose
-  geodesic crosses land/ice, splice back the *original* A* cell vertices found
-  via `original_path.index(p/q)`. **Gotcha:** index lookup only matches cell
-  centres; pairs whose endpoints are already-smoothed interpolations fall back
-  to `i=j=-1` and get no splice. This is why in legacy runs the *final* cursor
-  still had land grazes — `_ensure_safe` ran before smoothing. The diagonal-
-  corner rule (§4.3) is what actually keeps the end-to-end path clean today.
-- `_chaikin(pts, iterations)` — corner cutting: per segment `Q=25%`, `R=75%`,
-  **appended in that order**. Emitting `R` then `Q` was a historical bug that
-  zigzagged the curve and inflated distances ~2.5× (Parangipettai→Bharati read
-  12,013 nm instead of 4,868 nm) — see Known bugs.
-- `_smooth_safe(pts, mask, fallback=None)` — try Chaikin×2, then Chaikin×1,
-  then the unsmoothed line; return the first that is `_check_free`. A
-  land-crossing artificial curve is never returned.
-- `_resample(pts, 20.0)` — uniform ~20 nm spacing along the geodesics; the
-  returned leg lives at this density (126–609 pts depending on length).
-
-**Pipeline invariant nobody should break:** after every transform, the
-interior polyline must still pass `_check_free` at 5 nm. If you add a new
-transform, run it through `_smooth_safe`-style validation or prove it
-preserves water-clearance.
+  segments into geodesic jumps; validation re-checks land clearance and ice limits.
+- `_ensure_safe(pts, original_path, mask)` — splice back cell vertices for pairs crossing land.
+- `_chaikin(pts, iterations)` — corner cutting (emits Q then R to prevent oscillations).
+- `_smooth_safe(pts, mask, fallback=None)` — try Chaikin×2, then Chaikin×1, then fallback.
+- `_resample(pts, 20.0)` — uniform ~20 nm spacing along the geodesics.
 
 ---
 
 ## 6. Crossings & ECA
 
 `_crossings(path)` builds a shapely `LineString(lon,lat)` and intersects with
-chokepoint geometry:
-
-- `kind=="cape"` (Cape of Good Hope, Cape Horn): `Point` + `radiusNm`; hit when
-  geodesic distance(point, line) ≤ radius. Projected to sort along the route.
-- `kind=="strait"/"canal"` (everything else): `LineString` throat. GeoPoint
-  intersection when it crosses cleanly; otherwise falls back to a
-  **tolerance band** `STRAIT_TOL_DEG = 0.4°`: counts a transit when the route
-  runs within 0.4° of the line (the 0.5° grid channel can sit up to ~half a
-  grid diagonal from the hand-placed throat). Crossing is placed at `line.project(
-  centroid)` for ordering. The order follows route progress; duplicates removed,
-  deduped across legs.
+chokepoint geometry (`kind=="cape"` vs `kind=="strait"/"canal"` with `STRAIT_TOL_DEG = 0.4°`).
 
 `_eca_distance(path, eca_polys)` intersects the polyline with each ECA polygon
-and sums geodesic lengths of the intersection; incomplete ring fixes via
-`buffer(0)`; MultiPolygons are flattened.
-
-Distance/ECA always derive from the same `path` that's plotted, so the UI's
-displayed numbers match the drawn line by construction.
+and sums geodesic lengths of the intersection.
 
 ---
 
@@ -204,134 +162,190 @@ displayed numbers match the drawn line by construction.
 
 | File | Contents |
 |------|----------|
-| `ports.json` | NGA World Port Index. `name`, `aliases[]`, `lat`, `lon`, `isPort`, `countryCode`. `search_ports` does substring ranking (prefix first), `reverse_geocode` finds stations <120 nm / ports <8 nm. |
+| `ports.json` | NGA World Port Index. `name`, `aliases[]`, `lat`, `lon`, `isPort`, `countryCode`. |
 | `ne_110m_land.geojson` | Natural Earth land polygons → the mask. |
-| `ecas.json` | `{"ecas":[{name, type, polygons:[[ [lon,lat]… ]] }]}`. |
-| `chokepoints.json` | `{"chokepoints":[{name, kind, line?:[[lon,lat]… ], point?, radiusNm?}]}` — see below. |
-| `waterways.json` | `{"waterways":[{name, from:[lat,lon], via?:[[lat,lon]…], to:[lat,lon]}]}` — artificial canals. |
-
-Current named chokepoints (13):
-`Suez Canal, Strait of Gibraltar, Bab el-Mandeb, Strait of Hormuz, Malacca
-Strait, Sunda Strait, Torres Strait, Cape of Good Hope, Cape Horn, Panama
-Canal, Dardanelles, Bosphorus, Palk Strait`.
-Waterways (3): `Suez Canal, Panama Canal, Kiel Canal`.
-
-**To add a strait** (e.g. a future Chirikov attack): add a `kind:"strait"`
-entry with a `line` threaded through the real throat, add it to the include in
-`carve_water` if it's below grid resolution, restart. **To add a canal**: add a
-waterway with `from`/`via`/`to` (lat,lon); `_build_waterways` auto-snaps
-endpoints, so just restart.
-
-Note `chokepoints_geojson` renders straits as real `MultiPoint`-ready arrays —
-the old single-pair format silently broke the map overlay fixture; every
-`line` field today is `[list(pt) for pt in cp["line"]]`.
+| `ecas.json` | Emission Control Area polygons. |
+| `chokepoints.json` | Named straits and capes geometry. |
+| `waterways.json` | Artificial canal midlines (`from`, `via`, `to`). |
 
 ---
 
 ## 8. Running it
 
-- Backend: FastAPI/uvicorn on `127.0.0.1:8600` — **no `--reload`**, so every
-  code change requires a full restart (uvicorn runs in-process, mask builds
-  once, engine is in `app.state`).
-- Frontend: Vite dev server (in practice binds either `:5173` or `:5174`; check
-  `/tmp/planner_vite.log` — port drift is normal), keyed to `:8600`.
-- `../start.sh` starts both and tails logs into `/tmp/planner_api.log` /
-  `/tmp/planner_vite.log`.
-- Restart pattern used during known-good verification:
-  `kill` all start.sh/uvicorn/vite pids, then from `backend/`
-  `nohup ../start.sh > /tmp/startsh_stage4.log 2>&1 & disown`.
-- The project root path contains a trailing space — **quote paths** in every
-  shell/terminal command and use `workdir` instead of `cd`.
-
-### API
-- `POST /api/route` `{waypoints:[{id,label,lat,lon,isPort}], speedKnots,
-  departureTimeUTC, optimizeFor}`
-- `GET /api/ports?q=` · `GET /api/geocode?lat=&lon=` · `GET /api/ecas` ·
-  `GET /api/chokepoints` · `GET /api/health`
-- Errors: `400/422` with a `RouteError`/validation message surfaced to the UI.
+- Backend: FastAPI/uvicorn on `127.0.0.1:8600` — **no `--reload`** (runs in-process, mask builds once).
+- Frontend: Vite dev server on `:5173`.
+- Root directory has a trailing space — quote paths in shell commands.
 
 ---
 
-## 9. Testing / acceptance
+## 9. Testing / acceptance baseline
 
-Stage docs live in the repo root (`stage2.md` … `stage4.md`). The acceptance
-harness scripts used during development live in
-`/var/folders/…/T/opencode/routecheck/` (acc4.py / acc_smooth2.py /
-trace_pipeline.py / check_ui_s4.mjs …); move them into the repo if the team
-wants to keep them.
-
-Current verified baseline (Stage 4, post diagonal-fix):
-
-| Test | nm | Crossings |
-|------|----|-----------|
-| Tuticorin→Kankesanturai (Palk) | 127.1 | Palk Strait |
-| Izmir→Istanbul (Dardanelles) | 304.6 | Dardanelles, Bosphorus |
-| As Suways→Alexandria (Suez) | 260.8 | Suez Canal |
-| Athens→Jeddah (Med→Red) | 1325.6 | Suez Canal |
-| Mumbai→Bandar Abbas (Hormuz) | 1067.5 | Strait of Hormuz |
-| San Diego→New York (Panama) | 5086.3 | Panama Canal, ECA 330.5 |
-| Mumbai→Rotterdam | 7291.7 | Bab el-Mandeb, Suez Canal, Gibraltar |
-| Singapore→Colombo | 1697.6 | Malacca Strait |
-| Parangipettai→Bharati* | 4875.7 | Palk Strait |
-
-\* Southern-ocean long-haul, now routed by A* (geodesic is not land-free).
-
-Land-safety checks must test **`path[1:-1]`** (see §2). Smoothness gate:
-interior free + max turn angle modest (≈13° on the Mumbai→Chennai example).
+Current verified baseline (Stage 4):
+- Tuticorin→Kankesanturai (Palk): 127.1 nm (Palk Strait)
+- Izmir→Istanbul (Dardanelles): 304.6 nm (Dardanelles, Bosphorus)
+- As Suways→Alexandria (Suez): 260.8 nm (Suez Canal)
+- Athens→Jeddah (Med→Red): 1325.6 nm (Suez Canal)
+- Mumbai→Bandar Abbas (Hormuz): 1067.5 nm (Strait of Hormuz)
+- San Diego→New York (Panama): 5086.3 nm (Panama Canal, ECA 330.5 nm)
+- Mumbai→Rotterdam: 7291.7 nm (Bab el-Mandeb, Suez Canal, Gibraltar)
 
 ---
 
-## 10. Known bugs / open items (carry-forward for the team)
+## 10. Known bugs / open items
 
-1. **`_ensure_safe` index mismatch** — only concerns pre-validation pairs; when
-   smoothing happens after, the splice targets don't match. Currently covered by
-   the diagonal-corner rule; do **not** over-narrow the diagonal rule back to
-   "both cells" without re-running the Japan-archipelago legs.
-2. **Dardanelles crossing detection nuance** — the route took
-   `[Dardanelles, Bosphorus]` on the current grid, but a route that threads the
-   corridor slightly east of the new 4-pt Dardanelles line trips only Bosphorus.
-   Acceptance reads "Dardanelles, Bosphorus, or both"; satisfied, but not
-   symmetric.
-3. **Kiel Canal never used** on probed routes (Rotterdam→Gothenburg,
-   Copenhagen→Hamburg) because Skagerrak/Denmark-straits are navigable at 0.5°
-   and cheaper. The canal edge exists but isn't selected; confirm intended
-   behaviour before adding acceptance that requires it.
-4. **Hamburg→Antwerp ECA drift** — measured 236–241 nm vs an older 664 nm
-   figure in stage 3 notes; likely a path/measurement change, but verify
-   against the intended fixture.
-5. **Always sets `land free` False on the whole leg** if you include endpoints
-   (ports are in land cells). Do not "fix" this by carving ports to water —
-   that then mis-snaps `nearest_water` and can create tunnels from land.
-6. **`nearest_water` max_radius**: straits/corridors thinner than the search
-   band can return a far-neighbour cell; the `>30 nm snap` log is the tripwire.
-   `carve_water` corridors are belt-1-wide and should be re-verified whenever a
-   chokepoint is added.
-7. **`optimizeFor="time"` is wired but delegates to distance** (UI disables it,
-   labelled "needs weather/currents — phase 2").
+1. `_ensure_safe` index mismatch on smoothed points (mitigated by diagonal rule).
+2. Kiel Canal never selected over Skagerrak due to grid cost comparison.
+3. Port snapping: `nearest_water` max radius warning on inland port coordinates.
 
 ---
 
-## 11. Phase-2 direction (from the about-box + product intent)
+## 11. Developer Blueprint: How & Where to Improve the Algorithm
 
-- **Finer grid** would resolve straits/canals natively and shrink the
-  `carve_water` / `STRAIT_TOL_DEG` crutches — the biggest accuracy win.
-- **Current/weather-aware ETA**: replace Stage E's kinematic guess; keep it
-  isolated (`duration_hours` is the swap point).
-- **Path optimization objectives**: `optimizeFor="time"` is currently a stub;
-  implement as cost = f(wind/current) inside the A* edge cost.
-- **Dynamic waterways**: canal closures/availabilities; the waterway-edge cost
-  is a static scalar today.
+This section is a **file-by-file developer reference** explaining exactly where to modify the codebase to implement key algorithmic improvements.
+
+```
+backend/app/
+├── mask.py           <-- Grid resolution, land polygons, bathymetry, water carving
+├── route_engine.py   <-- A* search, edge cost functions, vessel constraints, post-smoothing
+├── geo.py            <-- Geodesic math, spherical/ellipsoidal calculations
+├── datastore.py      <-- Port indexing, spatial queries, search acceleration
+├── iceberg_engine.py <-- Dynamic hazard prediction & iceberg drift modeling
+├── environment.py    [NEW] <-- Weather & ocean current vector field integration
+└── main.py           <-- API endpoints, request validation, app lifecycle
+```
 
 ---
 
-## 12. Style / conventions
+### A. Increase Grid Resolution (Finer Water Mesh)
+*Goal: Native resolution of narrow straits/canals without relying heavily on `carve_water` or wide `STRAIT_TOL_DEG` thresholds.*
 
-- Pure-python geodesics in `geo.py` (Vincenty + haversine) — no external math
-  deps; keep new geometry there.
-- Single module per concern (mask / geo / datastore / route_engine / main).
-- Log noisy-but-useful diagnostics with `[route]`/`[mask]` prefixes
-  (`flush=True`), since the engine holds state across requests and the A* logs
-  are the main debugging window (large snaps, waterway loads, convergence).
-- Guard rails: alphabetical domains above are all internal; the **public**
-  invariants are "path never crosses land (interior)", "distance matches the
-  drawn path", "crossings in order".
+* **Primary File**: `backend/app/mask.py`
+  * **Line 26**: Change `SPACING = 0.5` to `0.25` (15 nm resolution, 720×1440 grid) or `0.1` (6 nm resolution, 1800×3600 grid).
+  * **Line 24**: Replace `ne_110m_land.geojson` with high-resolution Natural Earth vector data `ne_10m_land.geojson` in `backend/data/`.
+  * **Line 44-63 (`_build_grid`)**: When increasing grid size by 4× or 25×, optimize memory using `numpy` bitpacks or `scipy.ndimage` binary dilation.
+* **Secondary File**: `backend/app/route_engine.py`
+  * **Line 26**: Adjust `STRAIT_TOL_DEG = 0.4` to scale with `SPACING` (e.g. `STRAIT_TOL_DEG = SPACING * 0.8`).
+  * **Line 197 (`closed > 800000`)**: Increase max closed nodes cap to `4000000` for high-resolution grids.
+
+---
+
+### B. Implement Weather & Ocean Current Routing (`optimizeFor="time" / "fuel"`)
+*Goal: Account for surface ocean currents (OSCAR/Copernicus), wind resistance (ERA5), and wave height to find true fastest / most fuel-efficient routes.*
+
+* **New File**: `backend/app/environment.py`
+  * Create netCDF/GRIB2 reader or pre-processed grid loader returning `(u_current, v_current, u_wind, v_wind, wave_height)` at `(lat, lon, timestamp)`.
+* **Primary File**: `backend/app/route_engine.py`
+  * **`GridRouter._edge(r1, c1, r2, c2)` (Lines 112-117)**:
+    * Calculate bearing between cells `azimuth = geo.vincenty_inverse(...)`.
+    * Query current vector `(u, v)` from `environment.py`.
+    * Calculate Speed Over Ground: `SOG = vessel_stw + (u * sin(az) + v * cos(az))`.
+    * Modify edge cost based on `optimize_for`:
+      ```python
+      if optimize_for == "time":
+          edge_cost = dist_m / max(SOG_m_s, 0.5)
+      elif optimize_for == "fuel":
+          power_kw = cubic_resistance_model(vessel_stw, wave_height, wind_resistance)
+          edge_cost = power_kw * (dist_m / max(SOG_m_s, 0.5))
+      else:
+          edge_cost = dist_m  # pure distance
+      ```
+  * **`GridRouter.shortest_path()` (Line 119)**: Pass `optimize_for`, `vessel_speed_knots`, and `departure_time` into heuristic evaluation (`h = distance / max_vessel_speed`).
+  * **`RouteEngine.duration_hours()` (Lines 510-512)**: Perform numerical integration along final polyline segments: `t_total = sum(d_i / SOG_i)`.
+
+---
+
+### C. Enforce Vessel Constraints (Draft, Beam, Air Draft & Ice Class)
+*Goal: Prevent deep-draft ships (e.g. VLCC tankers) or wide vessels from taking shallow or restricted waterways (e.g. Malacca Strait vs Lombok/Makassar Straits, Panama Canal draft limits).*
+
+* **Primary Data File**: `backend/data/waterways.json`
+  * Add restriction metadata to waterway entries:
+    ```json
+    {
+      "name": "Panama Canal (Neopanamax)",
+      "from": [9.36, -79.92], "to": [8.88, -79.52],
+      "maxDraftMeters": 15.2,
+      "maxBeamMeters": 51.2,
+      "requiredIceClass": "none"
+    }
+    ```
+* **Primary File**: `backend/app/route_engine.py`
+  * **`GridRouter._build_waterways()` (Lines 76-101)**: Store constraint metadata on waterway shortcut edges.
+  * **`GridRouter.shortest_path()` (Lines 183-195)**: Inside the waterway neighbor expansion loop:
+    ```python
+    for nb, wcost, wmeta in self.waterways.get(node, ()):
+        if draft_meters > wmeta.get("maxDraftMeters", 999.0):
+            continue  # Ship too deep for this canal
+        if beam_meters > wmeta.get("maxBeamMeters", 999.0):
+            continue  # Ship too wide
+    ```
+  * **Shallow Water / Bathymetry Avoidance (Lines 167-170)**: Integrate GEBCO bathymetry grid in `LandMask` (`mask.py`). If `bathymetry_depth(lat, lon) < draft_meters + safety_margin`, reject node as impassable land.
+
+---
+
+### D. Dynamic Iceberg & Hazard Avoidance Cost Field
+*Goal: Dynamically route vessels around moving icebergs and sea-ice fields based on predicted iceberg drift.*
+
+* **Primary File**: `backend/app/iceberg_engine.py`
+  * Implements `generate_trajectory()` and `predict_position()`.
+* **Primary File**: `backend/app/route_engine.py`
+  * **`GridRouter.shortest_path()`**:
+    * Estimate vessel arrival time at cell `(rr, cc)`: `t_cell = departure_time + g[node] / vessel_speed`.
+    * Query iceberg locations at `t_cell` via `iceberg_engine.predict_position()`.
+    * Calculate distance `d_ice` from cell to nearest iceberg.
+    * Add exponential safety repulsion penalty to edge cost:
+      ```python
+      if d_ice < 50.0:  # within 50 nm of active iceberg
+          if ice_class == "none":
+              edge += 1000.0 * math.exp(-d_ice / 10.0) * geo.NM_TO_M
+          else:
+              edge += 100.0 * math.exp(-d_ice / 10.0) * geo.NM_TO_M
+      ```
+
+---
+
+### E. Advanced Path Post-Processing & Vessel Turn Kinematics
+*Goal: Replace staircase reduction and basic Chaikin smoothing with realistic ship turning circles (Dubins / Reeds-Shepp curves or B-splines).*
+
+* **Primary File**: `backend/app/route_engine.py`
+  * **`_chaikin()` (Lines 301-325)**: Replace basic control-point cutting with a constrained B-spline or cubic Hermite spline interpolation.
+  * **Turn Radius Enforcement**:
+    * Compute turning angle $\theta$ at each waypoint vertex.
+    * Enforce maximum rate of turn (ROT): $\text{Radius}_{\min} = \frac{v}{\text{ROT}_{\max}}$.
+    * Discard shortcut jumps in `_shortcut_water()` (Line 252) that produce turn angles exceeding ship maneuverability limits ($\theta > 45^\circ$).
+  * **`_ensure_safe()` (Lines 267-286)**: Replace exact `index()` lookup with spatial nearest-vertex indexing using `scipy.spatial.KDTree` to avoid index mismatch fallback issues.
+
+---
+
+### F. Emission Control Area (ECA) Cost Optimization
+*Goal: Allow ships to optimize routes by trading off extra distance outside ECA zones vs high-cost low-sulfur fuel inside ECAs.*
+
+* **Primary File**: `backend/app/route_engine.py`
+  * **`GridRouter.shortest_path()`**:
+    * Pre-rasterize ECA polygons (`data/ecas.json`) into `LandMask.eca_grid` bytearray.
+    * In neighbor loop, check if cell `(rr, cc)` is inside ECA:
+      ```python
+      fuel_cost_factor = 1.45 if self.mask.is_eca[nb] else 1.0  # MGO vs HFO price ratio
+      if optimize_for == "cost":
+          edge *= fuel_cost_factor
+      ```
+
+---
+
+### G. Performance & Search Acceleration (C++ / Rust / Numba Engine)
+*Goal: Scale A* search performance for real-time multi-vessel simulations or 0.1° high-resolution global grids.*
+
+* **Primary File**: `backend/app/route_engine.py`
+  * **Contraction Hierarchies / ALT (A*, Landmarks, Triangle Inequality)**: Precompute landmark distance vectors to prune 90%+ of graph search space.
+  * **PyBind11 / Numba Acceleration**: Move `GridRouter.shortest_path()` loop to C++ compiled module or Numba JIT compiler (`@numba.njit`). The 8-neighbor grid traversal runs 50×-100× faster in C++.
+
+---
+
+## 12. Style, Conventions & System Invariants
+
+- **Pure-python geodesics in `geo.py`**: Vincenty + haversine calculations are self-contained without external C-extensions. Keep core mathematical primitives here.
+- **Single module per concern**: `mask.py` (raster), `route_engine.py` (graph & path), `geo.py` (math), `datastore.py` (ports), `iceberg_engine.py` (drift & hazards).
+- **Console logging conventions**: Prefix diagnostics with `[route]`, `[mask]`, `[iceberg]` with `flush=True`.
+- **Public System Invariants**:
+  1. **Interior polyline land-safety**: `_check_free(path[1:-1])` must return `True` for every computed route leg.
+  2. **Distance consistency**: `totalDistanceNm` must strictly equal the geodesic sum of the polyline coordinates rendered on the frontend map.
+  3. **Order preservation**: Chokepoint crossings and ECA intersection distances must follow chronological progression along the route path.

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react'
-import { computeRoute } from './api'
+import { computeRoute, fetchIcebergs } from './api'
+import { computeClosestApproaches } from './utils'
 
 const PlannerContext = createContext(null)
 
@@ -13,8 +14,6 @@ export function defaultDeparture() {
   return d.toISOString().slice(0, 16).replace('T', 'T')
 }
 
-// A waypoint in the planner. Endpoints are plain {label, lat, lon} structs;
-// a port lookup is only one way to produce one.
 export function makeWaypoint(overrides = {}) {
   return {
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
@@ -49,6 +48,10 @@ export function PlannerProvider({ children }) {
   const [route, setRoute] = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeError, setRouteError] = useState(null)
+
+  const [icebergs, setIcebergs] = useState([])
+  const [sliderTimeISO, setSliderTimeISO] = useState('')
+  const [isPlaying, setIsPlaying] = useState(false)
 
   const setWaypoint = useCallback((index, patch) => {
     setWaypoints(prev => prev.map((w, i) => (i === index ? { ...w, ...patch } : w)))
@@ -88,6 +91,7 @@ export function PlannerProvider({ children }) {
     if (!valid) {
       setRoute(null)
       setRouteError(null)
+      setIcebergs([])
       return
     }
 
@@ -116,12 +120,25 @@ export function PlannerProvider({ children }) {
           payload.draftMeters,
           payload.iceClass,
         )
-        if (active) { setRoute(res); setRouteLoading(false) }
+        if (active) {
+          setRoute(res)
+          setRouteLoading(false)
+          setSliderTimeISO(departureTimeUTC)
+
+          // Fetch iceberg trajectories covering the route window
+          try {
+            const bergs = await fetchIcebergs(departureTimeUTC, res.etaUTC, 1.0)
+            if (active) setIcebergs(bergs)
+          } catch {
+            if (active) setIcebergs([])
+          }
+        }
       } catch (err) {
         if (active) {
           setRoute(null)
           setRouteError(err instanceof Error ? err.message : 'Routing failed')
           setRouteLoading(false)
+          setIcebergs([])
         }
       }
     }
@@ -129,6 +146,11 @@ export function PlannerProvider({ children }) {
     timer = setTimeout(run, 350)
     return () => { active = false; clearTimeout(timer) }
   }, [waypoints, speedKnots, departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, valid])
+
+  const closestApproaches = useMemo(() => {
+    if (!route || !icebergs.length) return []
+    return computeClosestApproaches(route, departureTimeUTC, icebergs)
+  }, [route, departureTimeUTC, icebergs])
 
   const value = useMemo(() => ({
     waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint,
@@ -144,11 +166,15 @@ export function PlannerProvider({ children }) {
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
     route, routeLoading, routeError,
+    icebergs,
+    sliderTimeISO, setSliderTimeISO,
+    isPlaying, setIsPlaying,
+    closestApproaches,
     valid,
   }), [waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint, speedKnots,
        departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, mapProjection,
        basemap, showEca, showChokepoints, showChevrons,
-       route, routeLoading, routeError, valid])
+       route, routeLoading, routeError, icebergs, sliderTimeISO, isPlaying, closestApproaches, valid])
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>
 }

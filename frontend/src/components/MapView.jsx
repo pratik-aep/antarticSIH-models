@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { fetchEcas, fetchChokepoints, geocode } from '../api'
 import { usePlanner } from '../store'
 import { unwrapLongitudes, splitIntoRenderedParts } from '../geo'
+import { getShipPositionAtTime, getIcebergPositionAtTime } from '../utils'
 
 const MAX_WAYPOINTS = 8
 
@@ -29,12 +30,58 @@ function basemapStyle() {
         attribution: '© CARTO · © OpenStreetMap contributors',
         maxzoom: 20,
       },
+      'basemap-ocean': {
+        type: 'raster',
+        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: '© Esri · GEBCO, NOAA, CHS, National Geographic',
+        maxzoom: 16,
+      },
+      'basemap-arctic': {
+        type: 'raster',
+        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/Polar/Arctic_Ocean_Base/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: '© Esri · GEBCO, NOAA, National Geographic',
+        maxzoom: 16,
+      },
+      'basemap-antarctic': {
+        type: 'raster',
+        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/Polar/Antarctic_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: '© Esri · Antarctic Imagery',
+        maxzoom: 16,
+      },
     },
     layers: [
       { id: 'basemap-standard', type: 'raster', source: 'basemap-standard' },
       { id: 'basemap-light', type: 'raster', source: 'basemap-light', layout: { visibility: 'none' } },
+      { id: 'basemap-ocean', type: 'raster', source: 'basemap-ocean', layout: { visibility: 'none' } },
+      { id: 'basemap-arctic', type: 'raster', source: 'basemap-arctic', layout: { visibility: 'none' } },
+      { id: 'basemap-antarctic', type: 'raster', source: 'basemap-antarctic', layout: { visibility: 'none' } },
     ],
   }
+}
+
+function transformCoord(lon, lat, projection) {
+  if (typeof lon !== 'number' || typeof lat !== 'number') return [lon, lat]
+
+  if (projection === 'arctic') {
+    const r = (90 - lat) * 0.18
+    const rad = (lon * Math.PI) / 180
+    const x = r * Math.sin(rad)
+    const y = -r * Math.cos(rad)
+    return [x, 80 + y]
+  }
+
+  if (projection === 'antarctic') {
+    const r = (90 + lat) * 0.18
+    const rad = (lon * Math.PI) / 180
+    const x = r * Math.sin(rad)
+    const y = r * Math.cos(rad)
+    return [x, -82 + y]
+  }
+
+  return [lon, lat]
 }
 
 export default function MapView() {
@@ -44,6 +91,7 @@ export default function MapView() {
     waypoints, addWaypoint, route, routeLoading,
     basemap, mapProjection, setMapProjection,
     showEca, showChokepoints, showChevrons,
+    icebergs, sliderTimeISO, departureTimeUTC,
   } = usePlanner()
 
   const addRef = useRef(addWaypoint)
@@ -51,8 +99,7 @@ export default function MapView() {
   const wpLenRef = useRef(waypoints.length)
   wpLenRef.current = waypoints.length
 
-  // Always holds a fn drawing the *current* route into the map source, so it
-  // can be called right after `load` too (waypoints may be set before then).
+  // Always holds a fn drawing the *current* route into the map source
   const drawRouteRef = useRef(() => {})
 
   // ---- init once ----
@@ -72,11 +119,6 @@ export default function MapView() {
     map.addControl(new maplibregl.AttributionControl({ compact: false }))
 
     map.on('load', () => {
-      // No runtime addImage() here: MapLibre v4.7 throws an atlas "mismatched
-      // image size" assertion when a canvas image is uploaded during/after the
-      // render frame. Pins and route arrows are drawn with vector/text layers
-      // instead, which skip image upload entirely and are reliable.
-
       map.addSource('route', { type: 'geojson', data: emptyFeatureCollection() })
       map.addLayer({
         id: 'route-outline',
@@ -172,16 +214,22 @@ export default function MapView() {
         } catch { /* ignore */ }
       })
       map.getCanvas().style.cursor = 'crosshair'
-      drawRouteRef.current() // route may be ready before tiles loaded
+      drawRouteRef.current()
     })
 
     return () => {
+      Object.values(icebergMarkersRef.current).forEach(m => m.remove())
+      icebergMarkersRef.current = {}
+      if (shipMarkerRef.current) {
+        shipMarkerRef.current.remove()
+        shipMarkerRef.current = null
+      }
       map.remove()
       mapRef.current = null
     }
   }, [])
 
-  // ---- route geometry (multi-part for antimeridian crossing) ----
+  // ---- route geometry (transformed for current projection) ----
   useEffect(() => {
     drawRouteRef.current = () => {
       const map = mapRef.current
@@ -190,24 +238,25 @@ export default function MapView() {
       if (!route || !route.legs || !route.legs.length) {
         geo = emptyFeatureCollection()
       } else {
-        // Concatenate all legs' sampled geodesics, deduping the shared endpoint.
         let pts = []
         for (const leg of route.legs) {
-          const legPts = leg.path.map(([lat, lon]) => [lat, lon]) // already [lat,lon]
+          const legPts = leg.path.map(([lat, lon]) => [lat, lon])
           if (pts.length && samePoint(pts[pts.length - 1], legPts[0])) legPts.shift()
           pts.push(...legPts)
         }
         if (pts.length < 2) {
           geo = emptyFeatureCollection()
         } else {
-          // Unwrap longitudes so great circles crossing the antimeridian stay
-          // contiguous, then split into per-world-copy parts for correct drawing.
           const unwrapped = unwrapLongitudes(pts)
           const parts = splitIntoRenderedParts(unwrapped)
 
-          geo = parts.length === 1
-            ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: parts[0] } }
-            : { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: parts } }
+          const transformedParts = parts.map(part =>
+            part.map(([lon, lat]) => transformCoord(lon, lat, mapProjection))
+          )
+
+          geo = transformedParts.length === 1
+            ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: transformedParts[0] } }
+            : { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: transformedParts } }
         }
       }
       map.getSource('route').setData(geo)
@@ -215,21 +264,121 @@ export default function MapView() {
     const map = mapRef.current
     if (map && map.getSource('route')) drawRouteRef.current()
     return () => { drawRouteRef.current = () => {} }
-  }, [route])
+  }, [route, mapProjection])
 
-  // ---- waypoint pins ----
+  // ---- waypoint pins (transformed for current projection) ----
   useEffect(() => {
     const map = mapRef.current
     if (!map || !map.getSource('waypoints')) return
     const features = waypoints
       .filter(w => typeof w.lat === 'number')
-      .map((w, i) => ({
-        type: 'Feature',
-        properties: { rank: String(i + 1), label: w.label },
-        geometry: { type: 'Point', coordinates: [w.lon, w.lat] },
-      }))
+      .map((w, i) => {
+        const [tLon, tLat] = transformCoord(w.lon, w.lat, mapProjection)
+        return {
+          type: 'Feature',
+          properties: { rank: String(i + 1), label: w.label },
+          geometry: { type: 'Point', coordinates: [tLon, tLat] },
+        }
+      })
     map.getSource('waypoints').setData({ type: 'FeatureCollection', features })
-  }, [waypoints])
+  }, [waypoints, mapProjection])
+
+  // ---- iceberg DOM markers synced to slider time ----
+  const icebergMarkersRef = useRef({})
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!icebergs || !icebergs.length) {
+      Object.values(icebergMarkersRef.current).forEach(m => m.remove())
+      icebergMarkersRef.current = {}
+      return
+    }
+
+    const targetTime = sliderTimeISO || departureTimeUTC
+    const currentIds = new Set(icebergs.map(b => b.id))
+
+    Object.keys(icebergMarkersRef.current).forEach(id => {
+      if (!currentIds.has(id)) {
+        icebergMarkersRef.current[id].remove()
+        delete icebergMarkersRef.current[id]
+      }
+    })
+
+    icebergs.forEach(berg => {
+      const pos = getIcebergPositionAtTime(berg, targetTime)
+      const [tLon, tLat] = transformCoord(pos.lon, pos.lat, mapProjection)
+
+      if (icebergMarkersRef.current[berg.id]) {
+        icebergMarkersRef.current[berg.id].setLngLat([tLon, tLat])
+      } else {
+        const el = document.createElement('div')
+        el.className = 'iceberg-marker-el'
+        el.innerHTML = `
+          <div class="iceberg-svg-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <polygon points="12,2 22,21 2,21" fill="#00d2ff" stroke="#005b96" stroke-width="2" stroke-linejoin="round"/>
+              <polygon points="12,2 15,10 12,14 8,11" fill="#ffffff" opacity="0.65"/>
+            </svg>
+          </div>
+          <div class="iceberg-label">${berg.name || berg.id}</div>
+        `
+        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([tLon, tLat])
+          .addTo(map)
+        icebergMarkersRef.current[berg.id] = marker
+      }
+    })
+  }, [icebergs, sliderTimeISO, departureTimeUTC, mapProjection])
+
+  // ---- moving ship DOM marker synced to slider time ----
+  const shipMarkerRef = useRef(null)
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!route || !sliderTimeISO) {
+      if (shipMarkerRef.current) {
+        shipMarkerRef.current.remove()
+        shipMarkerRef.current = null
+      }
+      return
+    }
+
+    const shipPos = getShipPositionAtTime(route, departureTimeUTC, sliderTimeISO)
+    if (!shipPos) {
+      if (shipMarkerRef.current) {
+        shipMarkerRef.current.remove()
+        shipMarkerRef.current = null
+      }
+      return
+    }
+
+    const [tLon, tLat] = transformCoord(shipPos.lon, shipPos.lat, mapProjection)
+
+    if (shipMarkerRef.current) {
+      shipMarkerRef.current.setLngLat([tLon, tLat])
+    } else {
+      const el = document.createElement('div')
+      el.className = 'ship-marker-el'
+      el.innerHTML = `
+        <div class="ship-pulse-halo"></div>
+        <div class="ship-svg-icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 15L2 9H22L20 15H4Z" fill="#ff7a00" stroke="#b35400" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M7 9V5H12V9" fill="#ffffff" stroke="#b35400" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M14 9V6H17V9" fill="#ffffff" stroke="#b35400" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M2 18C5 18 7 16 10 18C13 20 15 18 18 18C20 18 22 17 23 16.5" stroke="#ff7a00" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+      `
+      shipMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([tLon, tLat])
+        .addTo(map)
+    }
+  }, [route, sliderTimeISO, departureTimeUTC, mapProjection])
 
   // ---- ECA + chokepoints data ----
   useEffect(() => {
@@ -248,15 +397,17 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !map.getLayer('eca-outline')) return
-    map.setLayoutProperty('eca-fill', 'visibility', showEca ? 'visible' : 'none')
-    map.setLayoutProperty('eca-outline', 'visibility', showEca ? 'visible' : 'none')
-  }, [showEca])
+    const isPolar = mapProjection === 'arctic' || mapProjection === 'antarctic'
+    map.setLayoutProperty('eca-fill', 'visibility', showEca && !isPolar ? 'visible' : 'none')
+    map.setLayoutProperty('eca-outline', 'visibility', showEca && !isPolar ? 'visible' : 'none')
+  }, [showEca, mapProjection])
 
   useEffect(() => {
     const map = mapRef.current
     if (!map || !map.getLayer('chokepoints')) return
-    map.setLayoutProperty('chokepoints', 'visibility', showChokepoints ? 'visible' : 'none')
-  }, [showChokepoints])
+    const isPolar = mapProjection === 'arctic' || mapProjection === 'antarctic'
+    map.setLayoutProperty('chokepoints', 'visibility', showChokepoints && !isPolar ? 'visible' : 'none')
+  }, [showChokepoints, mapProjection])
 
   // ---- chevrons toggle ----
   const chevronsVisible = showChevrons && !!route
@@ -270,10 +421,34 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !map.getLayer('basemap-standard')) return
-    const target = `basemap-${basemap}`
-    map.setLayoutProperty('basemap-standard', 'visibility', target === 'basemap-standard' ? 'visible' : 'none')
-    map.setLayoutProperty('basemap-light', 'visibility', target === 'basemap-light' ? 'visible' : 'none')
-  }, [basemap])
+
+    if (mapProjection === 'arctic') {
+      map.setLayoutProperty('basemap-standard', 'visibility', 'none')
+      map.setLayoutProperty('basemap-light', 'visibility', 'none')
+      map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
+      map.setLayoutProperty('basemap-antarctic', 'visibility', 'none')
+      map.setLayoutProperty('basemap-arctic', 'visibility', 'visible')
+    } else if (mapProjection === 'antarctic') {
+      map.setLayoutProperty('basemap-standard', 'visibility', 'none')
+      map.setLayoutProperty('basemap-light', 'visibility', 'none')
+      map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
+      map.setLayoutProperty('basemap-arctic', 'visibility', 'none')
+      map.setLayoutProperty('basemap-antarctic', 'visibility', 'visible')
+    } else if (mapProjection === 'wgs84') {
+      map.setLayoutProperty('basemap-standard', 'visibility', 'none')
+      map.setLayoutProperty('basemap-light', 'visibility', 'none')
+      map.setLayoutProperty('basemap-arctic', 'visibility', 'none')
+      map.setLayoutProperty('basemap-antarctic', 'visibility', 'none')
+      map.setLayoutProperty('basemap-ocean', 'visibility', 'visible')
+    } else {
+      const target = `basemap-${basemap}`
+      map.setLayoutProperty('basemap-standard', 'visibility', target === 'basemap-standard' ? 'visible' : 'none')
+      map.setLayoutProperty('basemap-light', 'visibility', target === 'basemap-light' ? 'visible' : 'none')
+      map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
+      map.setLayoutProperty('basemap-arctic', 'visibility', 'none')
+      map.setLayoutProperty('basemap-antarctic', 'visibility', 'none')
+    }
+  }, [basemap, mapProjection])
 
   // ---- projection & polar view switcher ----
   useEffect(() => {
@@ -282,29 +457,17 @@ export default function MapView() {
 
     try {
       if (mapProjection === 'wgs84') {
-        if (typeof map.setProjection === 'function') {
-          map.setProjection({ type: 'globe' })
-        }
-        map.flyTo({ center: [0, 20], zoom: 1.8, pitch: 0, duration: 1000 })
+        map.flyTo({ center: [0, 15], zoom: 1.6, pitch: 0, duration: 1000 })
       } else if (mapProjection === 'arctic') {
-        if (typeof map.setProjection === 'function') {
-          map.setProjection({ type: 'globe' })
-        }
-        map.flyTo({ center: [0, 85], zoom: 2.5, pitch: 10, duration: 1000 })
+        map.flyTo({ center: [0, 80], zoom: 1.5, pitch: 0, duration: 1000 })
       } else if (mapProjection === 'antarctic') {
-        if (typeof map.setProjection === 'function') {
-          map.setProjection({ type: 'globe' })
-        }
-        map.flyTo({ center: [0, -82], zoom: 2.5, pitch: 10, duration: 1000 })
+        map.flyTo({ center: [0, -82], zoom: 1.4, pitch: 0, duration: 1000 })
       } else {
         // mercator
-        if (typeof map.setProjection === 'function') {
-          map.setProjection({ type: 'mercator' })
-        }
         map.flyTo({ center: [66, 12], zoom: 2.4, pitch: 0, duration: 1000 })
       }
     } catch {
-      /* fallback if projection mode unsupported */
+      /* ignore */
     }
   }, [mapProjection])
 
