@@ -111,6 +111,13 @@ function transformGeoJSON(geojson, projection) {
   return { ...geojson, features: transformedFeatures }
 }
 
+function getCardinalDirection(deg) {
+  if (typeof deg !== 'number' || isNaN(deg)) return ''
+  const val = Math.floor((deg / 22.5) + 0.5)
+  const arr = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  return arr[val % 16]
+}
+
 function createArrowImageData(fillColor, strokeColor = '#ffffff') {
   const canvas = document.createElement('canvas')
   canvas.width = 32
@@ -340,6 +347,69 @@ export default function MapView() {
           'icon-padding': 8,
         },
       })
+
+      const vectorPopup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        className: 'vector-hover-popup',
+        offset: 10,
+      })
+
+      const registerVectorHover = (layerId, title, icon, cardClass) => {
+        map.on('mousemove', layerId, (e) => {
+          if (!e.features || !e.features.length) return
+          map.getCanvas().style.cursor = 'pointer'
+          const feat = e.features[0]
+          const props = feat.properties || {}
+          const coords = feat.geometry.coordinates
+
+          const speed = props.speedKnots ?? '--'
+          const dir = props.dirDeg ?? '--'
+          const cardinal = typeof props.dirDeg === 'number' ? getCardinalDirection(props.dirDeg) : ''
+          const u = typeof props.u === 'number' ? props.u : 0
+          const v = typeof props.v === 'number' ? props.v : 0
+          const intensity = props.intensity || 'moderate'
+
+          const html = `
+            <div class="vector-popup-card ${cardClass}">
+              <div class="vector-popup-header">
+                <div class="vector-title-box">
+                  <span class="vector-icon">${icon}</span>
+                  <span class="vector-title">${title}</span>
+                </div>
+                <span class="vector-badge ${intensity}">${intensity}</span>
+              </div>
+              <div class="vector-popup-grid">
+                <div class="vector-stat-box">
+                  <span class="stat-label">Speed</span>
+                  <span class="stat-value"><strong>${speed}</strong> kn</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Heading</span>
+                  <span class="stat-value"><strong>${dir}°</strong> ${cardinal ? `(${cardinal})` : ''}</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Vector (u, v)</span>
+                  <span class="stat-value">${u >= 0 ? '+' : ''}${u}, ${v >= 0 ? '+' : ''}${v} m/s</span>
+                </div>
+                <div class="vector-stat-box">
+                  <span class="stat-label">Location</span>
+                  <span class="stat-value">${coords[1].toFixed(2)}°, ${coords[0].toFixed(2)}°</span>
+                </div>
+              </div>
+            </div>
+          `
+          vectorPopup.setLngLat(coords).setHTML(html).addTo(map)
+        })
+
+        map.on('mouseleave', layerId, () => {
+          map.getCanvas().style.cursor = 'crosshair'
+          vectorPopup.remove()
+        })
+      }
+
+      registerVectorHover('ocean-currents-vectors', 'Ocean Current', '🌊', 'ocean')
+      registerVectorHover('wind-vectors', 'Surface Wind (10m)', '💨', 'wind')
 
       map.on('click', async (e) => {
         if (wpLenRef.current >= MAX_WAYPOINTS) return
