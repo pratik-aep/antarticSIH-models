@@ -38,27 +38,11 @@ function basemapStyle() {
         attribution: '© Esri · GEBCO, NOAA, CHS, National Geographic',
         maxzoom: 16,
       },
-      'basemap-arctic': {
-        type: 'raster',
-        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/Polar/Arctic_Ocean_Base/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: '© Esri · GEBCO, NOAA, National Geographic',
-        maxzoom: 16,
-      },
-      'basemap-antarctic': {
-        type: 'raster',
-        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/Polar/Antarctic_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: '© Esri · Antarctic Imagery',
-        maxzoom: 16,
-      },
     },
     layers: [
       { id: 'basemap-standard', type: 'raster', source: 'basemap-standard' },
       { id: 'basemap-light', type: 'raster', source: 'basemap-light', layout: { visibility: 'none' } },
       { id: 'basemap-ocean', type: 'raster', source: 'basemap-ocean', layout: { visibility: 'none' } },
-      { id: 'basemap-arctic', type: 'raster', source: 'basemap-arctic', layout: { visibility: 'none' } },
-      { id: 'basemap-antarctic', type: 'raster', source: 'basemap-antarctic', layout: { visibility: 'none' } },
     ],
   }
 }
@@ -220,8 +204,6 @@ export default function MapView() {
     const map = mapRef.current
     if (!map) return
 
-    const isPolar = mapProjection === 'arctic' || mapProjection === 'antarctic'
-
     if (map.getLayer('sea-ice-fill')) {
       map.setLayoutProperty('sea-ice-fill', 'visibility', showSeaIce ? 'visible' : 'none')
     }
@@ -244,11 +226,11 @@ export default function MapView() {
       map.setLayoutProperty('storms-hazard-layer-modeled', 'visibility', showStorms ? 'visible' : 'none')
     }
     if (map.getLayer('eca-outline') && map.getLayer('eca-fill')) {
-      map.setLayoutProperty('eca-fill', 'visibility', showEca && !isPolar ? 'visible' : 'none')
-      map.setLayoutProperty('eca-outline', 'visibility', showEca && !isPolar ? 'visible' : 'none')
+      map.setLayoutProperty('eca-fill', 'visibility', showEca ? 'visible' : 'none')
+      map.setLayoutProperty('eca-outline', 'visibility', showEca ? 'visible' : 'none')
     }
     if (map.getLayer('chokepoints')) {
-      map.setLayoutProperty('chokepoints', 'visibility', showChokepoints && !isPolar ? 'visible' : 'none')
+      map.setLayoutProperty('chokepoints', 'visibility', showChokepoints ? 'visible' : 'none')
     }
     if (map.getLayer('route-chevrons')) {
       map.setLayoutProperty('route-chevrons', 'visibility', (showChevrons && !!route) ? 'visible' : 'none')
@@ -934,31 +916,15 @@ export default function MapView() {
     const map = mapRef.current
     if (!map || !map.getLayer('basemap-standard')) return
 
-    if (mapProjection === 'arctic') {
+    if (mapProjection === 'wgs84') {
       map.setLayoutProperty('basemap-standard', 'visibility', 'none')
       map.setLayoutProperty('basemap-light', 'visibility', 'none')
-      map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
-      map.setLayoutProperty('basemap-antarctic', 'visibility', 'none')
-      map.setLayoutProperty('basemap-arctic', 'visibility', 'visible')
-    } else if (mapProjection === 'antarctic') {
-      map.setLayoutProperty('basemap-standard', 'visibility', 'none')
-      map.setLayoutProperty('basemap-light', 'visibility', 'none')
-      map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
-      map.setLayoutProperty('basemap-arctic', 'visibility', 'none')
-      map.setLayoutProperty('basemap-antarctic', 'visibility', 'visible')
-    } else if (mapProjection === 'wgs84') {
-      map.setLayoutProperty('basemap-standard', 'visibility', 'none')
-      map.setLayoutProperty('basemap-light', 'visibility', 'none')
-      map.setLayoutProperty('basemap-arctic', 'visibility', 'none')
-      map.setLayoutProperty('basemap-antarctic', 'visibility', 'none')
       map.setLayoutProperty('basemap-ocean', 'visibility', 'visible')
     } else {
       const target = `basemap-${basemap}`
       map.setLayoutProperty('basemap-standard', 'visibility', target === 'basemap-standard' ? 'visible' : 'none')
       map.setLayoutProperty('basemap-light', 'visibility', target === 'basemap-light' ? 'visible' : 'none')
       map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
-      map.setLayoutProperty('basemap-arctic', 'visibility', 'none')
-      map.setLayoutProperty('basemap-antarctic', 'visibility', 'none')
     }
   }, [basemap, mapProjection])
 
@@ -970,10 +936,6 @@ export default function MapView() {
     try {
       if (mapProjection === 'wgs84') {
         map.flyTo({ center: [0, 15], zoom: 1.6, pitch: 0, duration: 1000 })
-      } else if (mapProjection === 'arctic') {
-        map.flyTo({ center: [0, 80], zoom: 1.5, pitch: 0, duration: 1000 })
-      } else if (mapProjection === 'antarctic') {
-        map.flyTo({ center: [0, -82], zoom: 1.4, pitch: 0, duration: 1000 })
       } else {
         // mercator
         map.flyTo({ center: [66, 12], zoom: 2.4, pitch: 0, duration: 1000 })
@@ -1063,8 +1025,6 @@ export default function MapView() {
         {[
           ['mercator', 'Mercator'],
           ['wgs84', 'WGS84'],
-          ['arctic', 'Arctic'],
-          ['antarctic', 'Antarctic'],
         ].map(([key, label]) => (
           <button
             key={key}

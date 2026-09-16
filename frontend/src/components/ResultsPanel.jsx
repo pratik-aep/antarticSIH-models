@@ -106,6 +106,21 @@ export default function ResultsPanel({ route, loading, error }) {
       <Row icon={<Ship size={15} />} label="Distance" value={`${route.totalDistanceNm.toLocaleString()} nm`} sub="total geodesic" />
       <Row icon={<MapPin size={15} />} label="Distance in ECA" value={route.totalDistanceInEcaNm ? `${route.totalDistanceInEcaNm.toLocaleString()} nm` : '0 nm'} sub={route.totalDistanceInEcaNm ? 'Emission control areas' : undefined} />
       <Row icon={<span style={{ fontSize: 13 }}>🧊</span>} label="Distance in Sea Ice" value={route.totalDistanceInSeaIceNm ? `${route.totalDistanceInSeaIceNm.toLocaleString()} nm` : '0 nm'} sub={route.maxSeaIceConcentrationPct ? `Max conc: ${route.maxSeaIceConcentrationPct}%` : 'Open water'} />
+      {route.meanPolarisRisk !== undefined && route.maxPolarisRisk > 0 && (
+        <Row
+          icon={<span style={{ fontSize: 13 }}>📊</span>}
+          label="POLARIS ice risk"
+          value={`${route.meanPolarisRisk} mean`}
+          sub={`Peak ${route.maxPolarisRisk} · ${route.vessel?.iceClass === 'none' ? 'unclassed hull' : route.vessel?.iceClass}`}
+        />
+      )}
+      {route.iceDataSource && (
+        <div className={`ice-source ${route.iceDataSource.startsWith('synthetic') ? 'synthetic' : 'live'}`}>
+          {route.iceDataSource.startsWith('synthetic')
+            ? `Ice costing used ${route.iceDataSource} — not the trained forecast`
+            : `Ice costing: ${route.iceDataSource}`}
+        </div>
+      )}
       {route.estimatedFuelTons !== undefined && (
         <Row icon={<span style={{ fontSize: 13 }}>⛽</span>} label="Estimated Fuel Burn" value={`${route.estimatedFuelTons.toLocaleString()} MT`} sub="Metric tons HFO/MGO" />
       )}

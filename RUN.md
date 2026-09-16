@@ -1,47 +1,62 @@
 # Running the integrated system
 
-## One-time setup
-
-Everything runs from a **single** Python environment that has the web stack and
-the model stack together. The system `python3` cannot load the models.
+## Start
 
 ```bash
-VENV=/Users/nawdddep/Documents/iceberg_models/iceberg_models-main/seaice_forecast/venv
-$VENV/bin/pip install -r backend/requirements.txt
-$VENV/bin/pip install joblib scikit-learn fastapi uvicorn httpx
+./start.sh
 ```
 
-## Start (two terminals)
+That is the whole thing. `start.sh` finds the model environment itself
+(`../seaice_forecast/venv`, which already has torch/joblib/scikit-learn from
+training), installs the web stack into it if needed, starts both servers, and
+prints whether the models came up:
 
-**Backend — port 8600. Vite proxies to this exact port.**
+```
+[backend]  ready at  http://127.0.0.1:8600
+[models]   LIVE — sea ice, iceberg drift, POLARIS risk
+```
+
+If it prints `DEGRADED` or a `WARNING: no model-capable venv`, the app is
+running on **simulated** data. Open the URL Vite prints and check the status
+badge under the panel header — it says the same thing in the UI.
+
+### Overrides
+
+| variable | purpose | default |
+|---|---|---|
+| `BACKEND_PORT` | backend port (Vite's proxy follows it) | `8600` |
+| `ICEBERG_MODEL_ROOT` | where the models repo lives | the parent directory |
+| `MODEL_VENV` | interpreter with the model deps | `$ICEBERG_MODEL_ROOT/seaice_forecast/venv` |
+
+The models are resolved **relative** to this checkout, so no absolute paths are
+baked in; set `ICEBERG_MODEL_ROOT` only if the two repos are checked out apart.
+
+### Standalone backend environment
+
+To run the backend outside the training venv:
+
 ```bash
-cd ~/Documents/route_map/shipNavigation/backend
-/Users/nawdddep/Documents/iceberg_models/iceberg_models-main/seaice_forecast/venv/bin/python \
-  -m uvicorn app.main:app --host 127.0.0.1 --port 8600
+pip install -r backend/requirements-models.txt   # includes requirements.txt
 ```
 
-**Frontend**
-```bash
-cd ~/Documents/route_map/shipNavigation/frontend
-npm run dev
-```
-
-Open the URL Vite prints (5173 or 5174).
+Installing only `requirements.txt` gives you the web stack **without** the
+models, i.e. the synthetic fallback.
 
 ## Verify the models are actually live
 
-The endpoints fall back to synthetic data rather than erroring, so a working
-map does NOT prove the models loaded. Check the payload:
+Endpoints fall back to synthetic data rather than erroring, so a working map
+does NOT prove the models loaded. One call answers it:
 
 ```bash
-curl -s http://127.0.0.1:8600/api/sea-ice | head -c 200
+curl -s http://127.0.0.1:8600/api/model-status
 ```
 
-Expect `"source":"UNet+ConvLSTM forecast (NSIDC CDR v6)"`.
-If it says `"synthetic (data unavailable)"` the models did not load - almost
-always the wrong Python interpreter.
+`"allLive": true` means all three are real. Anything else lists which component
+failed and why, per artifact. The UI badge reads the same endpoint, and
+`/api/route` responses carry `iceDataSource` naming the field that costed the
+route.
 
-Full check:
+Per-layer `source` strings, if you want to check them individually:
 
 | endpoint | expected `source` |
 |---|---|
@@ -53,8 +68,12 @@ Full check:
 
 ## Known gotchas
 
-**Port.** Backend MUST be 8600. On 8000 you get `ECONNREFUSED` proxy errors for
-every endpoint and the map silently shows nothing.
+**Port.** Backend and Vite proxy must agree. `start.sh` keeps them in sync via
+`BACKEND_PORT`; if you start the two by hand, pass the same value to both
+(`BACKEND_PORT=8601 npm run dev`). A mismatch gives `ECONNREFUSED` proxy errors
+for every endpoint and the map silently shows nothing. Note that an unrelated
+service already listening on 8600 produces the same symptom in reverse — the
+proxy connects, to the wrong app.
 
 **Forecast date.** The processed archive ends **2018-12-20**, so that is the
 default. Every layer accepts `?date=YYYY-MM-DD`. A winter date (e.g. 2018-08-15)
@@ -67,8 +86,8 @@ completely wrong map. The loader now detects this, logs an error, and falls
 back to `normalization_stats.reference.json`. If you see that error, restore:
 
 ```bash
-cd /Users/nawdddep/Documents/iceberg_models/iceberg_models-main/seaice_forecast
-cp data/processed/normalization_stats.reference.json data/processed/normalization_stats.json
+cd "$(git rev-parse --show-toplevel)/../seaice_forecast/data/processed"
+cp normalization_stats.reference.json normalization_stats.json
 ```
 
 **Demo route.** Maitri -> Bharati is the real NCPOR voyage and both stations are

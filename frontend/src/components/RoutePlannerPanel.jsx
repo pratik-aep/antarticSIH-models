@@ -3,6 +3,7 @@ import { Plus, Settings as SettingsIcon, Route as RouteIcon, Anchor, Globe } fro
 import WaypointRow from './WaypointRow'
 import ResultsPanel from './ResultsPanel'
 import VesselSelector from './VesselSelector'
+import ModelStatusBar from './ModelStatusBar'
 import { usePlanner } from '../store'
 
 function PlannerTab() {
@@ -117,8 +118,6 @@ function SettingsTab() {
           {[
             ['mercator', 'Mercator', 'Standard 2D'],
             ['wgs84', 'WGS84', '3D Globe'],
-            ['arctic', 'Arctic', 'North Polar'],
-            ['antarctic', 'Antarctic', 'South Polar'],
           ].map(([key, label, desc]) => (
             <button
               key={key}
@@ -173,7 +172,7 @@ function SettingsTab() {
         <p><strong>Ship Route Planner</strong> — v1</p>
         <p>
           Geodesic polyline routing with vessel-specific constraints and land avoidance on a 0.5° navigation grid.
-          Supports Mercator, WGS84 (Globe), Arctic, and Antarctic views.
+          Supports Mercator and WGS84 (Globe) views.
         </p>
         <p className="attribution">
           Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ·
@@ -201,6 +200,7 @@ export default function RoutePlannerPanel() {
             <SettingsIcon size={14} /> Settings
           </button>
         </nav>
+        <ModelStatusBar />
       </header>
       {tab === 'planner' ? <PlannerTab /> : <SettingsTab />}
     </aside>

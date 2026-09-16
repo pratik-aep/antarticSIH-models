@@ -252,8 +252,31 @@ async def wind(date: str = Query(default="")):
 @app.get("/api/ice-risk")
 async def ice_risk(date: str = Query(default=""), polarClass: str = Query(default="PC4")):
     """IMO POLARIS navigational ice risk, derived from the SIC forecast."""
-    from .model_bridge import ice_risk_geojson_real
-    return ice_risk_geojson_real(date or None, polar_class=polarClass)
+    try:
+        from .model_bridge import ice_risk_geojson_real
+        return ice_risk_geojson_real(date or None, polar_class=polarClass)
+    except Exception as exc:  # noqa: BLE001 - degrade like the sibling layers
+        logger.warning("ice-risk model unavailable: %s", exc)
+        return {"type": "FeatureCollection", "features": [],
+                "error": "model unavailable", "source": "unavailable"}
+
+
+@app.get("/api/model-status")
+async def model_status():
+    """Which trained models are actually live behind the map.
+
+    Every data endpoint falls back to synthetic output rather than failing, so
+    a rendering map is not evidence the models loaded. This runs them.
+    """
+    try:
+        from .model_bridge import model_status as status
+        return status()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("model status unavailable: %s", exc)
+        return {
+            "allLive": False, "liveComponents": [], "missingArtifacts": [],
+            "components": {}, "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 @app.get("/api/weather-heatmap")

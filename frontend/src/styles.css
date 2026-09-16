@@ -903,3 +903,70 @@ body {
   color: #1d4ed8;
   font-weight: 700;
 }
+/* --- model status ------------------------------------------------------- */
+.model-status {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 11.5px;
+  overflow: hidden;
+}
+.model-status.live { border-color: #bbf7d0; background: #f0fdf4; }
+.model-status.degraded { border-color: #fed7aa; background: #fff7ed; }
+.model-status.down { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.model-status.loading,
+.model-status.down {
+  display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+}
+.model-status.loading { color: var(--ink-soft); }
+
+.model-status-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 7px 9px; border: 0; background: none; cursor: pointer;
+  font: inherit; text-align: left; color: inherit;
+}
+.model-status.live .model-status-head { color: #15803d; }
+.model-status.degraded .model-status-head { color: #c2410c; }
+.model-status-label { font-weight: 600; flex: 1; }
+.model-status-date { color: var(--ink-soft); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.model-caret { transition: transform 0.15s ease; flex: 0 0 auto; }
+.model-caret.open { transform: rotate(180deg); }
+
+.model-status-body {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 7px 9px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.model-row { display: flex; align-items: flex-start; gap: 7px; }
+.model-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  margin-top: 4px; flex: 0 0 auto;
+}
+.model-dot.live { background: #22c55e; }
+.model-dot.down { background: #f97316; }
+.model-row-main { display: flex; flex-direction: column; min-width: 0; }
+.model-row-name { font-weight: 600; color: var(--ink); }
+.model-row-detail { color: var(--ink-soft); font-size: 10.5px; }
+
+.model-metrics {
+  display: flex; flex-wrap: wrap; gap: 4px 10px;
+  padding-top: 5px; border-top: 1px dashed var(--line);
+  color: var(--ink-soft); font-size: 10.5px;
+}
+.model-metrics b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.model-status-hint {
+  margin: 0; padding-top: 5px; border-top: 1px dashed var(--line);
+  color: #9a3412; font-size: 10.5px; line-height: 1.4;
+}
+
+.ice-source {
+  margin: 2px 0 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.ice-source.live { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.ice-source.synthetic { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }

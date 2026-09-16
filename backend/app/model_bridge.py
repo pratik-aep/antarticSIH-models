@@ -26,10 +26,23 @@ from typing import Any
 
 import numpy as np
 
-# The models live in a sibling repository, not inside this app.
-MODEL_ROOT = Path("/Users/nawdddep/Documents/iceberg_models/iceberg_models-main")
+# The models live in the parent repository this app is checked out inside:
+# <model root>/shipNavigation/backend/app/model_bridge.py -> parents[3].
+# ICEBERG_MODEL_ROOT overrides it when the two are checked out separately.
+import os
+
+MODEL_ROOT = Path(
+    os.environ.get("ICEBERG_MODEL_ROOT") or Path(__file__).resolve().parents[3]
+)
 SEAICE = MODEL_ROOT / "seaice_forecast"
 DRIFT = MODEL_ROOT / "iceberg-drift"
+SEAICE_SRC = SEAICE / "src"
+
+
+def ensure_seaice_importable() -> None:
+    """Put the seaice_forecast package on sys.path (risk/fuel/routing modules)."""
+    if str(SEAICE_SRC) not in sys.path:
+        sys.path.insert(0, str(SEAICE_SRC))
 
 DAILY = SEAICE / "data/processed/regridded/daily"
 MASK_P = SEAICE / "data/processed/land_ocean_mask_ps25.npy"
@@ -97,8 +110,7 @@ def _load_norm_stats() -> dict:
 
 @lru_cache(maxsize=1)
 def _sic_model():
-    if str(SEAICE / "src") not in sys.path:
-        sys.path.insert(0, str(SEAICE / "src"))
+    ensure_seaice_importable()
     import torch
     from seaice_forecast.models.unet_convlstm import UNetConvLSTM
 
@@ -368,8 +380,7 @@ def wind_geojson_real(date_str: str | None = None) -> dict:
 def ice_risk_geojson_real(date_str: str | None = None,
                           polar_class: str = "PC4") -> dict:
     """IMO POLARIS navigational risk derived from the SIC forecast."""
-    if str(SEAICE / "src") not in sys.path:
-        sys.path.insert(0, str(SEAICE / "src"))
+    ensure_seaice_importable()
     from seaice_forecast.risk.polaris import risk_ice_array
 
     ds = date_str or DEFAULT_FORECAST_DATE.strftime("%Y-%m-%d")
@@ -441,3 +452,69 @@ def sic_at_point(lat: float, lon: float, date_str: str | None = None) -> float:
     v = np.array([[np.cos(t) * np.cos(p), np.cos(t) * np.sin(p), np.sin(t)]])
     _, k = tree.query(v, k=1)
     return float(_sic_flat(ds)[int(k[0])] * 100.0)
+
+
+# ------------------------------------------------------------- model status
+# Every endpoint falls back to synthetic data on failure so the map never 500s.
+# That is the right call for availability and the wrong one for trust: a working
+# map does not prove the models loaded. This actually runs each model so the UI
+# can say which of the two it is.
+
+def model_status() -> dict[str, Any]:
+    """Exercise each trained model once and report what really loaded."""
+    artifacts = {
+        "daily_archive": DAILY, "land_mask": MASK_P, "norm_stats": NORM_P,
+        "grid_lonlat": LONLAT_P, "sic_checkpoint": SIC_CKPT,
+        "drift_model": DRIFT_PKL, "drift_fixes": DRIFT_CSV,
+    }
+    missing = [n for n, p in artifacts.items() if not p.exists()]
+    ds = DEFAULT_FORECAST_DATE.strftime("%Y-%m-%d")
+
+    sea_ice: dict[str, Any] = {"live": False}
+    try:
+        sic = predict_sic(ds)
+        sea_ice = {
+            "live": True,
+            "model": "U-Net + ConvLSTM (NSIDC CDR v6)",
+            "validDate": ds,
+            "gridShape": list(sic.shape),
+            "meanConcentration": round(float(sic.mean()) * 100, 2),
+            "iceCoveredPct": round(float((sic > 0.15).mean()) * 100, 2),
+        }
+    except Exception as exc:  # noqa: BLE001 - status must never raise
+        sea_ice["error"] = f"{type(exc).__name__}: {exc}"
+
+    drift: dict[str, Any] = {"live": False}
+    try:
+        bundle, frame = _drift_bundle()
+        drift = {
+            "live": True,
+            "model": "two-stage GBM (3.96 km RMS @24h)",
+            "bergFixes": int(len(frame)),
+            "latestFix": frame["date"].max().strftime("%Y-%m-%d"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        drift["error"] = f"{type(exc).__name__}: {exc}"
+
+    polaris: dict[str, Any] = {"live": False}
+    try:
+        ensure_seaice_importable()
+        from seaice_forecast.risk.polaris import risk_ice
+        polaris = {
+            "live": True,
+            "model": "IMO POLARIS risk index",
+            "sample": {"sic": 0.7, "PC4": round(float(risk_ice(0.7, polar_class="PC4")), 3)},
+        }
+    except Exception as exc:  # noqa: BLE001
+        polaris["error"] = f"{type(exc).__name__}: {exc}"
+
+    components = {"seaIce": sea_ice, "icebergDrift": drift, "polarisRisk": polaris}
+    live = [k for k, v in components.items() if v["live"]]
+    return {
+        "modelRoot": str(MODEL_ROOT),
+        "allLive": len(live) == len(components),
+        "liveComponents": live,
+        "missingArtifacts": missing,
+        "forecastDate": ds,
+        "components": components,
+    }

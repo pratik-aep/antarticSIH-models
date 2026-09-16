@@ -78,6 +78,11 @@ export async function fetchWeatherHeatmap() {
   return json(res)
 }
 
+export async function fetchModelStatus() {
+  const res = await fetch(`${API_BASE}/model-status`)
+  return json(res)
+}
+
 export async function fetchRouteWeather(routeId = '', departureTime = '', speedKnots = 15) {
   const params = new URLSearchParams()
   if (routeId) params.set('routeId', routeId)
