@@ -103,6 +103,8 @@ function PlannerTab() {
 function SettingsTab() {
   const {
     basemap, setBasemap,
+    showSeamarks, setShowSeamarks,
+    showWindFlow, setShowWindFlow,
     mapProjection, setMapProjection,
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
@@ -136,7 +138,11 @@ function SettingsTab() {
         <div className="section-head"><span className="section-title">Basemap</span></div>
         <div className="basemap-grid">
           {[
+            ['google-sat', 'Google imagery', 'Satellite'],
+            ['google-hybrid', 'Imagery + labels', 'Hybrid'],
+            ['google-streets', 'Google roads', 'Streets'],
             ['standard', 'OpenStreetMap', 'Standard'],
+            ['opentopo', 'OpenTopoMap relief', 'Topo'],
             ['light', 'CARTO light', 'Light'],
           ].map(([key, desc, label]) => (
             <button key={key} className={`basemap-card ${basemap === key ? 'active' : ''}`} onClick={() => setBasemap(key)}>
@@ -150,6 +156,14 @@ function SettingsTab() {
 
       <section className="section">
         <div className="section-head"><span className="section-title">Overlays</span></div>
+        <label className="toggle-row">
+          <span>Seamarks (buoys, lights, depths)</span>
+          <input type="checkbox" checked={showSeamarks} onChange={(e) => setShowSeamarks(e.target.checked)} />
+        </label>
+        <label className="toggle-row">
+          <span>Animated wind flow</span>
+          <input type="checkbox" checked={showWindFlow} onChange={(e) => setShowWindFlow(e.target.checked)} />
+        </label>
         <label className="toggle-row">
           <span>Sea Ice concentration (cyan)</span>
           <input type="checkbox" checked={showSeaIce} onChange={(e) => setShowSeaIce(e.target.checked)} />

@@ -77,6 +77,33 @@ def polaris_risk_at(lat: float, lon: float, ice_class: str = "none") -> float:
     except Exception:
         return 0.0
 
+def ice_fuel_multiplier(lat: float, lon: float, ice_class: str = "none") -> float:
+    """Fuel burn at this point relative to the same cell in open water.
+
+    1.0 in ice-free water, ~4.3 in heavy ice for a PC4 hull. Speed collapses and
+    delivered power rises at the same time, so burn per kilometre climbs faster
+    than concentration alone suggests. Normalising by the open-water burn keeps
+    this a pure ice penalty that is independent of vessel size, so it can scale
+    the engine's existing fuel accounting rather than replace it.
+
+    Returns 1.0 (no penalty) when the model is unavailable.
+    """
+    try:
+        from .model_bridge import ensure_seaice_importable, sic_at_point
+        ensure_seaice_importable()
+        from seaice_forecast.fuel import fuel_per_km_array
+
+        pc = _ICE_CLASS_TO_POLAR.get(str(ice_class).lower(), "UNCLASSED")
+        sic = sic_at_point(lat, lon) / 100.0
+        if sic <= 0.0:
+            return 1.0
+        burn = float(fuel_per_km_array(sic, polar_class=pc))
+        ref = float(fuel_per_km_array(0.0, polar_class=pc))
+        return burn / ref if ref > 0 else 1.0
+    except Exception:
+        return 1.0
+
+
 A_STAR = True
 
 # Max planar-degrees distance from a strait/canal reference throat line within
@@ -202,14 +229,18 @@ class GridRouter:
         # A* reaches each cell from up to 8 neighbours, so an uncached lookup
         # repeats the same KD-tree query ~8x. The field is fixed for the whole
         # search, so memoise per cell.
-        ice_cache: dict[int, tuple[float, float]] = {}
+        ice_cache: dict[int, tuple[float, float, float]] = {}
 
         def ice_at(cell, lat, lon):
             hit = ice_cache.get(cell)
             if hit is None:
                 conc = get_sea_ice_concentration(lat, lon)
-                pol = polaris_risk_at(lat, lon, ice_class) if conc > 0.0 else 0.0
-                hit = ice_cache[cell] = (conc, pol)
+                if conc > 0.0:
+                    pol = polaris_risk_at(lat, lon, ice_class)
+                    fuel_mult = ice_fuel_multiplier(lat, lon, ice_class)
+                else:
+                    pol, fuel_mult = 0.0, 1.0
+                hit = ice_cache[cell] = (conc, pol, fuel_mult)
             return hit
 
         while heap:
@@ -253,7 +284,7 @@ class GridRouter:
 
                 # Sea-ice concentration cost weighting
                 lon_cc = (self.lons[cc] % 360.0) - 180.0
-                ice_conc, _pol_risk = ice_at(nb, lat_rr, lon_cc)
+                ice_conc, _pol_risk, _fuel_mult = ice_at(nb, lat_rr, lon_cc)
 
                 # Weather & Current field sampling for Time / Fuel / Safety modes
                 u_curr = 0.35 + 0.15 * math.sin(math.radians(lon_cc)) if lat_rr < -50.0 else (0.25 * math.cos(math.radians(lon_cc)) + 0.10 if lat_rr > 50.0 else -0.30 if abs(lat_rr) < 15.0 else 0.20)
@@ -285,6 +316,9 @@ class GridRouter:
                     fuel_rate_factor = (v_water / target_speed_knots) ** 3
                     time_factor = target_speed_knots / sog
                     edge *= max(0.25, fuel_rate_factor * time_factor)
+                    # Ice dominates fuel wherever there is ice: burn per km rises
+                    # ~4.3x in heavy pack, far more than currents or wind move it.
+                    edge *= _fuel_mult
                 elif optimize_for == "safety":
                     # Safety maximization: Extra penalty on ice zones, extreme wind storms, and iceberg proximity
                     wind_speed = math.hypot(u_wind, v_wind) * 1.94384
@@ -304,7 +338,13 @@ class GridRouter:
                 if _pol_risk > 0.0:
                     edge *= (1.0 + 2.5 * _pol_risk)
 
-                if not is_polar:
+                # In fuel mode the physical model above already prices ice via
+                # speed collapse and power rise. The heuristic below reaches ~32x
+                # in heavy pack, so applying both would double-count ice and let
+                # the heuristic, not the fuel physics, pick the route.
+                if optimize_for == "fuel":
+                    pass
+                elif not is_polar:
                     if ice_conc > 45.0:
                         # Heavy ice is penalized heavily so non-polar ships seek open water channels,
                         # but allowed so routes to polar stations/ports do not fail completely.
@@ -716,7 +756,7 @@ class RouteEngine:
 
                 v_water = max(4.0, speed_knots - curr_along - 0.02 * wind_along)
                 base_fuel_rate_h = 1.45 * ((v_water / 15.0) ** 3)  # MT per hour at design speed
-                leg_fuel_mt += base_fuel_rate_h * seg_h
+                leg_fuel_mt += base_fuel_rate_h * seg_h * ice_fuel_multiplier(mid_lat, mid_lon, ice_class)
 
                 total_curr_boost += curr_along
                 segment_count += 1
@@ -748,6 +788,7 @@ class RouteEngine:
         total_ice_nm = 0.0
         max_ice_conc = 0.0
         max_polaris = 0.0
+        max_fuel_mult = 1.0
         risk_weighted_nm = 0.0
         polar_nm = 0.0
         for leg in legs:
@@ -766,6 +807,8 @@ class RouteEngine:
                     max_polaris = max(max_polaris, pol)
                     risk_weighted_nm += pol * seg_dist
                     polar_nm += seg_dist
+                    max_fuel_mult = max(max_fuel_mult,
+                                        ice_fuel_multiplier(mid_lat, mid_lon, ice_class))
 
         mean_polaris = risk_weighted_nm / polar_nm if polar_nm > 0 else 0.0
 
@@ -783,6 +826,7 @@ class RouteEngine:
             "maxSeaIceConcentrationPct": round(max_ice_conc, 1),
             "meanPolarisRisk": round(mean_polaris, 3),
             "maxPolarisRisk": round(max_polaris, 3),
+            "maxIceFuelPenalty": round(max_fuel_mult, 2),
             "iceDataSource": ice_data_source(),
             "totalDurationHours": round(total_hours, 2),
             "estimatedFuelTons": round(total_fuel_mt, 1),

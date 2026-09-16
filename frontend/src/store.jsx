@@ -40,7 +40,10 @@ export function PlannerProvider({ children }) {
   const [iceClass, setIceClass] = useState('none')
   const [mapProjection, setMapProjection] = useState('mercator')
 
-  const [basemap, setBasemap] = useState('standard')
+  const [basemap, setBasemap] = useState('google-sat')
+  const [showSeamarks, setShowSeamarks] = useState(false)
+  const [is3D, setIs3D] = useState(false)
+  const [showWindFlow, setShowWindFlow] = useState(false)
   const [showEca, setShowEca] = useState(true)
   const [showChokepoints, setShowChokepoints] = useState(false)
   const [showChevrons, setShowChevrons] = useState(true)
@@ -235,6 +238,9 @@ export function PlannerProvider({ children }) {
     iceClass, setIceClass,
     mapProjection, setMapProjection,
     basemap, setBasemap,
+    showSeamarks, setShowSeamarks,
+    is3D, setIs3D,
+    showWindFlow, setShowWindFlow,
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
@@ -254,7 +260,8 @@ export function PlannerProvider({ children }) {
     valid,
   }), [waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint, speedKnots,
        departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, mapProjection,
-       basemap, showEca, showChokepoints, showChevrons, showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind,
+       basemap, showSeamarks, is3D, showWindFlow,
+       showEca, showChokepoints, showChevrons, showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind,
        showWeatherHeatmap, showStorms, weatherSubFilters, toggleWeatherSubFilter, route, routeLoading, routeError, icebergs, routeWeather,
        sliderTimeISO, isPlaying, closestApproaches, shipWeatherAtSliderTime, valid])
 

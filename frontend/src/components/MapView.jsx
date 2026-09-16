@@ -1,9 +1,10 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { fetchEcas, fetchChokepoints, fetchSeaIce, fetchIceRisk, fetchOceanCurrents, fetchWind, fetchWeatherHeatmap, geocode } from '../api'
 import { usePlanner } from '../store'
 import LayerControlPanel from './LayerControlPanel'
+import WindFlowLayer from './WindFlowLayer'
 import { unwrapLongitudes, splitIntoRenderedParts } from '../geo'
 import { getShipPositionAtTime, getIcebergPositionAtTime } from '../utils'
 
@@ -12,17 +13,82 @@ const MAX_WAYPOINTS = 8
 const PIN_BLUE = '#1452c4'
 const PIN_WHITE = '#ffffff'
 
+// Camera tilt for the 3D view. Past ~60 deg the horizon enters frame and raster
+// tiles at the far edge stretch badly, so this stays just under it.
+const PITCH_3D = 55
+
+// Every selectable basemap layer. The seamark overlay is deliberately absent:
+// it draws on top of a basemap rather than being one.
+const BASEMAP_LAYER_IDS = [
+  'basemap-google-sat',
+  'basemap-google-streets',
+  'basemap-google-hybrid',
+  'basemap-standard',
+  'basemap-opentopo',
+  'basemap-light',
+]
+
 function basemapStyle() {
   return {
     version: 8,
     glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
     sources: {
+      'basemap-google-sat': {
+        type: 'raster',
+        tiles: [
+          'https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          'https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          'https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+        ],
+        tileSize: 256,
+        attribution: '© Google Maps',
+        maxzoom: 20,
+      },
+      'basemap-google-streets': {
+        type: 'raster',
+        tiles: [
+          'https://mt0.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+          'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+          'https://mt2.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+          'https://mt3.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+        ],
+        tileSize: 256,
+        attribution: '© Google Maps',
+        maxzoom: 20,
+      },
+      'basemap-google-hybrid': {
+        type: 'raster',
+        tiles: [
+          'https://mt0.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',
+          'https://mt1.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',
+          'https://mt2.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',
+          'https://mt3.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',
+        ],
+        tileSize: 256,
+        attribution: '© Google Maps',
+        maxzoom: 20,
+      },
       'basemap-standard': {
         type: 'raster',
         tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
         tileSize: 256,
         attribution: '© OpenStreetMap contributors',
         maxzoom: 19,
+      },
+      'basemap-opentopo': {
+        type: 'raster',
+        tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© OpenTopoMap contributors',
+        maxzoom: 17,
+      },
+      'overlay-seamarks': {
+        type: 'raster',
+        tiles: ['https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© OpenSeaMap contributors',
+        maxzoom: 18,
       },
       'basemap-light': {
         type: 'raster',
@@ -31,18 +97,15 @@ function basemapStyle() {
         attribution: '© CARTO · © OpenStreetMap contributors',
         maxzoom: 20,
       },
-      'basemap-ocean': {
-        type: 'raster',
-        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: '© Esri · GEBCO, NOAA, CHS, National Geographic',
-        maxzoom: 16,
-      },
     },
     layers: [
-      { id: 'basemap-standard', type: 'raster', source: 'basemap-standard' },
+      { id: 'basemap-google-sat', type: 'raster', source: 'basemap-google-sat', layout: { visibility: 'visible' } },
+      { id: 'basemap-standard', type: 'raster', source: 'basemap-standard', layout: { visibility: 'none' } },
+      { id: 'basemap-opentopo', type: 'raster', source: 'basemap-opentopo', layout: { visibility: 'none' } },
       { id: 'basemap-light', type: 'raster', source: 'basemap-light', layout: { visibility: 'none' } },
-      { id: 'basemap-ocean', type: 'raster', source: 'basemap-ocean', layout: { visibility: 'none' } },
+      { id: 'basemap-google-streets', type: 'raster', source: 'basemap-google-streets', layout: { visibility: 'none' } },
+      { id: 'basemap-google-hybrid', type: 'raster', source: 'basemap-google-hybrid', layout: { visibility: 'none' } },
+      { id: 'overlay-seamarks', type: 'raster', source: 'overlay-seamarks', layout: { visibility: 'none' } },
     ],
   }
 }
@@ -132,6 +195,7 @@ export default function MapView() {
   const {
     waypoints, addWaypoint, route, routeLoading,
     basemap, mapProjection, setMapProjection,
+    showSeamarks, is3D, setIs3D, showWindFlow,
     showEca, showChokepoints, showChevrons, showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, weatherSubFilters,
     icebergs, routeWeather, shipWeatherAtSliderTime, closestApproaches, sliderTimeISO, departureTimeUTC,
   } = usePlanner()
@@ -243,6 +307,7 @@ export default function MapView() {
 
   // Always holds a fn drawing the *current* route into the map source
   const drawRouteRef = useRef(() => {})
+  const [mapInstance, setMapInstance] = useState(null)
 
   // ---- init once ----
   useEffect(() => {
@@ -256,11 +321,16 @@ export default function MapView() {
     })
     mapRef.current = map
 
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'nautical' }), 'bottom-left')
     map.addControl(new maplibregl.AttributionControl({ compact: false }))
+    // The 2D/3D toggle owns tilt; rotation is enabled with it.
+    map.dragRotate.disable()
 
     map.on('load', () => {
+      // A ref alone cannot tell the overlay the map exists, so publish it as
+      // state: the wind canvas needs the instance to project coordinates.
+      setMapInstance(map)
       map.addSource('route', { type: 'geojson', data: emptyFeatureCollection() })
       map.addLayer({
         id: 'route-outline',
@@ -916,34 +986,60 @@ export default function MapView() {
     const map = mapRef.current
     if (!map || !map.getLayer('basemap-standard')) return
 
-    if (mapProjection === 'wgs84') {
-      map.setLayoutProperty('basemap-standard', 'visibility', 'none')
-      map.setLayoutProperty('basemap-light', 'visibility', 'none')
-      map.setLayoutProperty('basemap-ocean', 'visibility', 'visible')
-    } else {
-      const target = `basemap-${basemap}`
-      map.setLayoutProperty('basemap-standard', 'visibility', target === 'basemap-standard' ? 'visible' : 'none')
-      map.setLayoutProperty('basemap-light', 'visibility', target === 'basemap-light' ? 'visible' : 'none')
-      map.setLayoutProperty('basemap-ocean', 'visibility', 'none')
+    const target = `basemap-${basemap}`
+    for (const id of BASEMAP_LAYER_IDS) {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, 'visibility', id === target ? 'visible' : 'none')
+      }
     }
-  }, [basemap, mapProjection])
+    // Seamarks are buoys, lights and depth contours drawn on transparent tiles,
+    // so they stack on whichever basemap is active rather than replacing it.
+    if (map.getLayer('overlay-seamarks')) {
+      map.setLayoutProperty('overlay-seamarks', 'visibility', showSeamarks ? 'visible' : 'none')
+    }
+  }, [basemap, showSeamarks])
 
   // ---- projection & polar view switcher ----
+  // Read through a ref so changing the projection keeps whatever tilt the user
+  // has chosen, instead of snapping the camera flat.
+  const is3DRef = useRef(is3D)
+  is3DRef.current = is3D
+
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
 
+    const pitch = is3DRef.current ? PITCH_3D : 0
     try {
       if (mapProjection === 'wgs84') {
-        map.flyTo({ center: [0, 15], zoom: 1.6, pitch: 0, duration: 1000 })
+        map.flyTo({ center: [0, 15], zoom: 1.6, pitch, duration: 1000 })
       } else {
         // mercator
-        map.flyTo({ center: [66, 12], zoom: 2.4, pitch: 0, duration: 1000 })
+        map.flyTo({ center: [66, 12], zoom: 2.4, pitch, duration: 1000 })
       }
     } catch {
       /* ignore */
     }
   }, [mapProjection])
+
+  // ---- 2D / 3D camera ----
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    try {
+      map.easeTo({
+        pitch: is3D ? PITCH_3D : 0,
+        bearing: is3D ? map.getBearing() : 0,
+        duration: 600,
+      })
+      // Drag-rotate is what makes a tilted view navigable; leaving it on in 2D
+      // lets the map be rotated into a state the flat view cannot express.
+      if (is3D) map.dragRotate.enable()
+      else map.dragRotate.disable()
+    } catch {
+      /* ignore */
+    }
+  }, [is3D])
 
   // ---- fit to route once computed (not on every keystroke) ----
   const fittedRef = useRef('')
@@ -968,7 +1064,8 @@ export default function MapView() {
   return (
     <div className="map-wrap">
       <div ref={containerRef} className="map" />
-      
+      <WindFlowLayer map={mapInstance} visible={showWindFlow} />
+
       <LayerControlPanel />
 
       {route && (showStorms || (showSeaIce && icebergs.length > 0)) && (
@@ -1035,6 +1132,15 @@ export default function MapView() {
             {label}
           </button>
         ))}
+        <span className="map-proj-sep" />
+        <button
+          type="button"
+          className={`map-proj-btn ${is3D ? 'active' : ''}`}
+          onClick={() => setIs3D(!is3D)}
+          title={is3D ? 'Switch to flat view' : 'Tilt the camera; drag to rotate'}
+        >
+          {is3D ? '3D' : '2D'}
+        </button>
       </div>
 
       {routeLoading && <div className="routing-indicator"><span className="spinner" /> Routing…</div>}

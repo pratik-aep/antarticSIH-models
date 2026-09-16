@@ -16,11 +16,13 @@ export default function LayerControlPanel() {
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
+    showWindFlow, setShowWindFlow,
+    showSeamarks, setShowSeamarks,
   } = usePlanner()
 
   const activeCount = [
     showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind, showWeatherHeatmap, showStorms,
-    showEca, showChokepoints, showChevrons
+    showEca, showChokepoints, showChevrons, showWindFlow, showSeamarks
   ].filter(Boolean).length
 
   return (
@@ -54,6 +56,8 @@ export default function LayerControlPanel() {
                   setShowEca(true)
                   setShowChokepoints(true)
                   setShowChevrons(true)
+                  setShowWindFlow(true)
+                  setShowSeamarks(true)
                 }}
               >
                 All
@@ -70,6 +74,8 @@ export default function LayerControlPanel() {
                   setShowEca(false)
                   setShowChokepoints(false)
                   setShowChevrons(false)
+                  setShowWindFlow(false)
+                  setShowSeamarks(false)
                 }}
               >
                 None
@@ -78,6 +84,19 @@ export default function LayerControlPanel() {
           </div>
 
           <div className="layer-list">
+            <label className="layer-item">
+              <span className="layer-item-icon wind-flow"><Wind size={15} /></span>
+              <span className="layer-item-info">
+                <span className="layer-name">Wind Flow</span>
+                <span className="layer-sub">Animated streamlines &middot; Open-Meteo live</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={showWindFlow}
+                onChange={(e) => setShowWindFlow(e.target.checked)}
+              />
+            </label>
+
             <label className="layer-item">
               <span className="layer-item-icon currents"><Waves size={15} /></span>
               <span className="layer-item-info">
@@ -182,6 +201,19 @@ export default function LayerControlPanel() {
                 </div>
               )}
             </div>
+
+            <label className="layer-item">
+              <span className="layer-item-icon seamarks"><Compass size={15} /></span>
+              <span className="layer-item-info">
+                <span className="layer-name">Seamarks</span>
+                <span className="layer-sub">Buoys, lights & depth contours</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={showSeamarks}
+                onChange={(e) => setShowSeamarks(e.target.checked)}
+              />
+            </label>
 
             <label className="layer-item">
               <span className="layer-item-icon chevrons">➢</span>

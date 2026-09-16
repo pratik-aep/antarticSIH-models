@@ -122,7 +122,14 @@ export default function ResultsPanel({ route, loading, error }) {
         </div>
       )}
       {route.estimatedFuelTons !== undefined && (
-        <Row icon={<span style={{ fontSize: 13 }}>⛽</span>} label="Estimated Fuel Burn" value={`${route.estimatedFuelTons.toLocaleString()} MT`} sub="Metric tons HFO/MGO" />
+        <Row
+          icon={<span style={{ fontSize: 13 }}>⛽</span>}
+          label="Estimated Fuel Burn"
+          value={`${route.estimatedFuelTons.toLocaleString()} MT`}
+          sub={route.maxIceFuelPenalty > 1.05
+            ? `Peak ice penalty ${route.maxIceFuelPenalty}× open water`
+            : 'Metric tons HFO/MGO'}
+        />
       )}
       {route.safetyScore !== undefined && (
         <Row icon={<span style={{ fontSize: 13 }}>🛡️</span>} label="Safety Score" value={`${route.safetyScore} / 100`} sub={route.safetyScore >= 80 ? 'Optimal Clearance' : route.safetyScore >= 50 ? 'Moderate Clearance' : 'High Risk Hazard'} />
