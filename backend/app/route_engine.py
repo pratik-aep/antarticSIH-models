@@ -16,7 +16,55 @@ import shapely.geometry as sgeo
 
 from . import geo
 from .mask import LandMask, LAT_TOP, LON_LEFT, NROWS, NCOLS, SPACING
-from .sea_ice import get_sea_ice_concentration
+from .sea_ice import get_sea_ice_concentration as _synthetic_sic
+
+
+def get_sea_ice_concentration(lat: float, lon: float) -> float:
+    """Sea-ice concentration for route costing.
+
+    Prefers the trained U-Net+ConvLSTM forecast so the planner routes around
+    ice the model actually predicts. Falls back to the synthetic field if the
+    model artifacts are unavailable, so routing never fails outright.
+    """
+    try:
+        from .model_bridge import sic_at_point
+        return sic_at_point(lat, lon)
+    except Exception:
+        return _synthetic_sic(lat, lon)
+
+
+# Map the API's ice_class strings onto IMO POLARIS Polar Classes. POLARIS is the
+# IMO's Polar Operational Limit Assessment Risk Indexing System - the actual
+# standard used to decide whether a given hull may enter given ice conditions.
+_ICE_CLASS_TO_POLAR = {
+    "pc1_pc7": "PC4", "icebreaker": "PC2",
+    "pc1": "PC1", "pc2": "PC2", "pc3": "PC3", "pc4": "PC4",
+    "pc5": "PC5", "pc6": "PC6", "pc7": "PC7",
+    "1a_super": "PC6", "1a": "PC7", "1b": "PC7", "1c": "PC7",
+    "none": "UNCLASSED", "": "UNCLASSED",
+}
+
+
+def polaris_risk_at(lat: float, lon: float, ice_class: str = "none") -> float:
+    """IMO POLARIS navigational risk in [0, 1] for this hull at this point.
+
+    Returns 0.0 (no ice penalty) whenever the model or the risk module is
+    unavailable, so routing degrades to the plain concentration weighting
+    rather than failing.
+    """
+    try:
+        from .model_bridge import sic_at_point
+        import sys as _sys
+        from pathlib import Path as _P
+        _src = _P("/Users/nawdddep/Documents/iceberg_models/iceberg_models-main/seaice_forecast/src")
+        if str(_src) not in _sys.path:
+            _sys.path.insert(0, str(_src))
+        from seaice_forecast.risk.polaris import risk_ice
+
+        pc = _ICE_CLASS_TO_POLAR.get(str(ice_class).lower(), "UNCLASSED")
+        return float(risk_ice(sic_at_point(lat, lon) / 100.0, polar_class=pc))
+    except Exception:
+        return 0.0
 
 A_STAR = True
 
@@ -223,6 +271,16 @@ class GridRouter:
                         if dist_b < 60.0:  # 60 nm safety buffer
                             safety_penalty += 3.5 * ((60.0 - dist_b) / 60.0)
                     edge *= safety_penalty
+
+                # IMO POLARIS risk for THIS hull class. Concentration alone is
+                # hull-agnostic: 70% ice is routine for a PC2 icebreaker and
+                # prohibitive for an unclassed vessel. POLARIS encodes exactly
+                # that distinction, so the same field yields different routes
+                # for different ships.
+                if ice_conc > 0.0:
+                    _pol = polaris_risk_at(lat_rr, lon_cc, ice_class)
+                    if _pol > 0.0:
+                        edge *= (1.0 + 2.5 * _pol)
 
                 if not is_polar:
                     if ice_conc > 45.0:

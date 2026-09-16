@@ -16,6 +16,7 @@ import time
 import shapely.geometry as sgeo
 from shapely import points as shapely_points
 from shapely.ops import unary_union
+from shapely.prepared import prep
 
 from . import geo
 
@@ -43,7 +44,9 @@ class LandMask:
 
     def _build_grid(self, land):
         grid = bytearray(NROWS * NCOLS)
-        chunk_rows = 8
+        # Use prepared geometry for much faster point-in-polygon tests
+        prepared_land = prep(land)
+        chunk_rows = 16  # Process more rows at once for better vectorization
         for r0 in range(0, NROWS, chunk_rows):
             r_end = min(r0 + chunk_rows, NROWS)
             pts = []
@@ -55,11 +58,12 @@ class LandMask:
                     lon = LON_LEFT + c * SPACING
                     pts.append((lon, lat))
                     idx.append(base + c)
-            inside = land.contains(shapely_points(pts))
-            for j, i in enumerate(idx):
-                if inside[j]:
+            # Use prepared geometry contains for faster testing
+            points_arr = shapely_points(pts)
+            for j, (pt, i) in enumerate(zip(points_arr, idx)):
+                if prepared_land.contains(pt):
                     grid[i] = 1
-            del pts, idx, inside
+            del pts, idx, points_arr
         return grid
 
     def cell(self, lat: float, lon: float) -> bool:

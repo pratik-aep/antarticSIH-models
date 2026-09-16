@@ -58,6 +58,11 @@ export async function fetchSeaIce() {
   return json(res)
 }
 
+export async function fetchIceRisk(polarClass = 'PC4') {
+  const res = await fetch(`${API_BASE}/ice-risk?polarClass=${encodeURIComponent(polarClass)}`)
+  return json(res)
+}
+
 export async function fetchOceanCurrents() {
   const res = await fetch(`${API_BASE}/ocean-currents`)
   return json(res)

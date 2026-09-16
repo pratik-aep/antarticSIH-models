@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { fetchEcas, fetchChokepoints, fetchSeaIce, fetchOceanCurrents, fetchWind, fetchWeatherHeatmap, geocode } from '../api'
+import { fetchEcas, fetchChokepoints, fetchSeaIce, fetchIceRisk, fetchOceanCurrents, fetchWind, fetchWeatherHeatmap, geocode } from '../api'
 import { usePlanner } from '../store'
 import LayerControlPanel from './LayerControlPanel'
 import { unwrapLongitudes, splitIntoRenderedParts } from '../geo'
@@ -148,7 +148,7 @@ export default function MapView() {
   const {
     waypoints, addWaypoint, route, routeLoading,
     basemap, mapProjection, setMapProjection,
-    showEca, showChokepoints, showChevrons, showSeaIce, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, weatherSubFilters,
+    showEca, showChokepoints, showChevrons, showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, weatherSubFilters,
     icebergs, routeWeather, shipWeatherAtSliderTime, closestApproaches, sliderTimeISO, departureTimeUTC,
   } = usePlanner()
 
@@ -158,6 +158,8 @@ export default function MapView() {
   wpLenRef.current = waypoints.length
 
   const rawSeaIceRef = useRef(null)
+
+  const rawIceRiskRef = useRef(null)
   const rawCurrentsRef = useRef(null)
   const rawWindRef = useRef(null)
   const rawWeatherHeatmapRef = useRef(null)
@@ -168,6 +170,9 @@ export default function MapView() {
     const map = mapRef.current
     if (!map) return
 
+    if (rawIceRiskRef.current && map.getSource('ice-risk')) {
+      map.getSource('ice-risk').setData(transformGeoJSON(rawIceRiskRef.current, mapProjection))
+    }
     if (rawSeaIceRef.current && map.getSource('sea-ice')) {
       map.getSource('sea-ice').setData(transformGeoJSON(rawSeaIceRef.current, mapProjection))
     }
@@ -220,6 +225,9 @@ export default function MapView() {
     if (map.getLayer('sea-ice-fill')) {
       map.setLayoutProperty('sea-ice-fill', 'visibility', showSeaIce ? 'visible' : 'none')
     }
+    if (map.getLayer('ice-risk-fill')) {
+      map.setLayoutProperty('ice-risk-fill', 'visibility', showIceRisk ? 'visible' : 'none')
+    }
     if (map.getLayer('ocean-currents-vectors')) {
       map.setLayoutProperty('ocean-currents-vectors', 'visibility', showOceanCurrents ? 'visible' : 'none')
     }
@@ -245,7 +253,8 @@ export default function MapView() {
     if (map.getLayer('route-chevrons')) {
       map.setLayoutProperty('route-chevrons', 'visibility', (showChevrons && !!route) ? 'visible' : 'none')
     }
-  }, [showSeaIce, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, showEca, showChokepoints, showChevrons, mapProjection, route])
+  }, [showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, showEca, showChokepoints, showChevrons, mapProjection, route])
+
 
   const syncVisibilityRef = useRef(syncLayerVisibility)
   syncVisibilityRef.current = syncLayerVisibility
@@ -370,6 +379,26 @@ export default function MapView() {
             '#90e0ef'
           ],
           'fill-opacity': 0.35,
+        },
+      })
+
+      // IMO POLARIS navigational ice risk, derived from the SIC forecast.
+      // Severity buckets mirror the backend: low / elevated / severe.
+      map.addSource('ice-risk', { type: 'geojson', data: emptyFeatureCollection() })
+      map.addLayer({
+        id: 'ice-risk-fill',
+        type: 'fill',
+        source: 'ice-risk',
+        layout: { visibility: 'none' },
+        paint: {
+          'fill-color': [
+            'match',
+            ['get', 'severity'],
+            'severe', '#b00020',
+            'elevated', '#f18701',
+            '#f7d154'
+          ],
+          'fill-opacity': 0.45,
         },
       })
 
@@ -862,6 +891,12 @@ export default function MapView() {
     fetchSeaIce().then(fc => {
       if (!alive) return
       rawSeaIceRef.current = fc
+      syncRef.current()
+    }).catch(() => {})
+
+    fetchIceRisk(polarClass).then(fc => {
+      if (!alive) return
+      rawIceRiskRef.current = fc
       syncRef.current()
     }).catch(() => {})
 

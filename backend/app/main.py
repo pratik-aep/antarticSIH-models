@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
+import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -86,6 +87,8 @@ async def lifespan(app: FastAPI):
     print("[api] ready", flush=True)
     yield
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Ship Route Planner", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
@@ -189,25 +192,68 @@ async def icebergs(
         dep_end = _parse_departure(endTime)
     else:
         dep_end = dep_start + timedelta(days=7)
-    return get_all_icebergs_with_trajectories(dep_start, dep_end, step_hours=stepHours)
+    try:
+        from .model_bridge import icebergs_with_trajectories_real
+        return icebergs_with_trajectories_real(dep_start, dep_end, step_hours=stepHours)
+    except Exception as exc:  # noqa: BLE001 - degrade, never 500 the map
+        logger.warning("drift model unavailable, using mock icebergs: %s", exc)
+        return get_all_icebergs_with_trajectories(dep_start, dep_end, step_hours=stepHours)
 
 
 @app.get("/api/sea-ice")
-async def sea_ice():
-    from .sea_ice import sea_ice_geojson
-    return sea_ice_geojson()
+async def sea_ice(date: str = Query(default="")):
+    """Sea-ice concentration from the trained U-Net+ConvLSTM forecaster.
+
+    Falls back to the synthetic field only if the model artifacts are absent,
+    so the map still renders rather than erroring.
+    """
+    try:
+        from .model_bridge import sea_ice_geojson_real
+        return sea_ice_geojson_real(date or None)
+    except Exception as exc:  # noqa: BLE001 - degrade, never 500 the map
+        logger.warning("sea-ice model unavailable, using synthetic field: %s", exc)
+        from .sea_ice import sea_ice_geojson
+        out = sea_ice_geojson()
+        for f in out["features"]:
+            f["properties"]["source"] = "synthetic (model unavailable)"
+        return out
 
 
 @app.get("/api/ocean-currents")
-async def ocean_currents():
-    from .environment_layers import ocean_currents_geojson
-    return ocean_currents_geojson()
+async def ocean_currents(date: str = Query(default="")):
+    """Real GLORYS12 surface currents; synthetic field only as a fallback."""
+    try:
+        from .model_bridge import ocean_currents_geojson_real
+        return ocean_currents_geojson_real(date or None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("currents data unavailable, using synthetic: %s", exc)
+        from .environment_layers import ocean_currents_geojson
+        out = ocean_currents_geojson()
+        for f in out["features"]:
+            f["properties"]["source"] = "synthetic (data unavailable)"
+        return out
 
 
 @app.get("/api/wind")
-async def wind():
-    from .environment_layers import wind_geojson
-    return wind_geojson()
+async def wind(date: str = Query(default="")):
+    """Real ERA5 10 m wind; synthetic field only as a fallback."""
+    try:
+        from .model_bridge import wind_geojson_real
+        return wind_geojson_real(date or None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("wind data unavailable, using synthetic: %s", exc)
+        from .environment_layers import wind_geojson
+        out = wind_geojson()
+        for f in out["features"]:
+            f["properties"]["source"] = "synthetic (data unavailable)"
+        return out
+
+
+@app.get("/api/ice-risk")
+async def ice_risk(date: str = Query(default=""), polarClass: str = Query(default="PC4")):
+    """IMO POLARIS navigational ice risk, derived from the SIC forecast."""
+    from .model_bridge import ice_risk_geojson_real
+    return ice_risk_geojson_real(date or None, polar_class=polarClass)
 
 
 @app.get("/api/weather-heatmap")

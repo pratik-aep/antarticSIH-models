@@ -6,6 +6,8 @@ export default function LayerControlPanel() {
   const [isOpen, setIsOpen] = useState(true)
   const {
     showSeaIce, setShowSeaIce,
+    showIceRisk, setShowIceRisk,
+    polarClass, setPolarClass,
     showOceanCurrents, setShowOceanCurrents,
     showWind, setShowWind,
     showWeatherHeatmap, setShowWeatherHeatmap,
@@ -17,7 +19,7 @@ export default function LayerControlPanel() {
   } = usePlanner()
 
   const activeCount = [
-    showSeaIce, showOceanCurrents, showWind, showWeatherHeatmap, showStorms,
+    showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind, showWeatherHeatmap, showStorms,
     showEca, showChokepoints, showChevrons
   ].filter(Boolean).length
 
@@ -90,30 +92,35 @@ export default function LayerControlPanel() {
             </label>
 
             <label className="layer-item">
-              <span className="layer-item-icon wind"><Wind size={15} /></span>
+              <span className="layer-item-icon ice"><ShieldAlert size={15} /></span>
               <span className="layer-item-info">
-                <span className="layer-name">Surface Wind</span>
-                <span className="layer-sub">ERA5 wind vectors (10m)</span>
+                <span className="layer-name">POLARIS Ice Risk</span>
+                <span className="layer-sub">IMO risk index &middot; {polarClass}</span>
               </span>
               <input
                 type="checkbox"
-                checked={showWind}
-                onChange={(e) => setShowWind(e.target.checked)}
+                checked={showIceRisk}
+                onChange={(e) => setShowIceRisk(e.target.checked)}
               />
             </label>
 
-            <label className="layer-item">
-              <span className="layer-item-icon ice"><Compass size={15} /></span>
-              <span className="layer-item-info">
-                <span className="layer-name">Sea Ice Field</span>
-                <span className="layer-sub">AMSR2 0–100% concentration</span>
-              </span>
-              <input
-                type="checkbox"
-                checked={showSeaIce}
-                onChange={(e) => setShowSeaIce(e.target.checked)}
-              />
-            </label>
+            {showIceRisk && (
+              <label className="layer-item" style={{ paddingLeft: 30 }}>
+                <span className="layer-item-info">
+                  <span className="layer-name">Vessel Polar Class</span>
+                  <span className="layer-sub">Lower class = stronger icebreaker</span>
+                </span>
+                <select
+                  value={polarClass}
+                  onChange={(e) => setPolarClass(e.target.value)}
+                  style={{ fontSize: 12, padding: '2px 4px' }}
+                >
+                  {['PC1','PC2','PC3','PC4','PC5','PC6','PC7','UNCLASSED'].map(pc => (
+                    <option key={pc} value={pc}>{pc}</option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <label className="layer-item">
               <span className="layer-item-icon eca"><ShieldAlert size={15} /></span>
