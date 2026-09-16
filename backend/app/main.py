@@ -261,6 +261,22 @@ async def ice_risk(date: str = Query(default=""), polarClass: str = Query(defaul
                 "error": "model unavailable", "source": "unavailable"}
 
 
+@app.get("/api/model-tests")
+async def model_tests():
+    """Verifiable evidence for the model test dashboard.
+
+    Loads each artifact, runs it, and returns the result alongside the held-out
+    metrics from the training runs, so the page shows measurements rather than
+    claims.
+    """
+    try:
+        from .model_tests import run_model_tests
+        return run_model_tests()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("model tests failed")
+        return {"error": f"{type(exc).__name__}: {exc}", "components": []}
+
+
 @app.get("/api/model-status")
 async def model_status():
     """Which trained models are actually live behind the map.
@@ -283,3 +299,59 @@ async def model_status():
 async def weather_heatmap():
     from .environment_layers import weather_heatmap_geojson
     return weather_heatmap_geojson()
+
+
+# ---------------------------------------------------------------- explorer
+# Interactive counterparts to /api/model-tests. Each one loads a .pkl from
+# model_exports/ and runs it against inputs the reader chose, so the dashboard
+# shows the artifact answering a question rather than replaying a fixed sample.
+def _explorer_error(exc: Exception) -> dict:
+    logger.warning("model explorer: %s", exc)
+    return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+@app.get("/api/model-explorer/curves")
+async def explorer_curves(distanceKm: float = Query(default=25.0, ge=1.0, le=500.0)):
+    """Risk and fuel swept across concentration, for every Polar Class."""
+    try:
+        from .model_explorer import curves
+        return curves(distanceKm)
+    except Exception as exc:  # noqa: BLE001
+        return _explorer_error(exc)
+
+
+@app.get("/api/model-explorer/point")
+async def explorer_point(
+    sic: float = Query(default=0.7, ge=0.0, le=1.0),
+    polarClass: str = Query(default="PC4", max_length=16),
+    distanceKm: float = Query(default=25.0, ge=1.0, le=500.0),
+):
+    """One operating point, evaluated by the two deterministic artifacts."""
+    try:
+        from .model_explorer import point
+        return point(sic, polarClass, distanceKm)
+    except Exception as exc:  # noqa: BLE001
+        return _explorer_error(exc)
+
+
+@app.get("/api/model-explorer/seaice")
+async def explorer_seaice(date: str = Query(default="2018-12-20", max_length=10)):
+    """A full 332x316 forecast grid from seaice_forecast.pkl, packed for canvas."""
+    try:
+        from .model_explorer import seaice_field
+        return seaice_field(date)
+    except Exception as exc:  # noqa: BLE001
+        return _explorer_error(exc)
+
+
+@app.get("/api/model-explorer/drift")
+async def explorer_drift(
+    date: str = Query(default="", max_length=10),
+    limit: int = Query(default=400, ge=1, le=2000),
+):
+    """Per-berg 24 h drift vectors from iceberg_drift.pkl."""
+    try:
+        from .model_explorer import drift_field
+        return drift_field(date, limit)
+    except Exception as exc:  # noqa: BLE001
+        return _explorer_error(exc)

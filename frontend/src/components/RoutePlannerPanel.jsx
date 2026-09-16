@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Plus, Settings as SettingsIcon, Route as RouteIcon, Anchor, Globe } from 'lucide-react'
+import { Plus, Settings as SettingsIcon, Route as RouteIcon, Anchor } from 'lucide-react'
 import WaypointRow from './WaypointRow'
 import ResultsPanel from './ResultsPanel'
 import VesselSelector from './VesselSelector'
@@ -105,7 +105,6 @@ function SettingsTab() {
     basemap, setBasemap,
     showSeamarks, setShowSeamarks,
     showWindFlow, setShowWindFlow,
-    mapProjection, setMapProjection,
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
     showChevrons, setShowChevrons,
@@ -114,26 +113,6 @@ function SettingsTab() {
 
   return (
     <div className="planner-body settings-body">
-      <section className="section">
-        <div className="section-head"><span className="section-title">Map View / Projection</span></div>
-        <div className="projection-grid">
-          {[
-            ['mercator', 'Mercator', 'Standard 2D'],
-            ['wgs84', 'WGS84', '3D Globe'],
-          ].map(([key, label, desc]) => (
-            <button
-              key={key}
-              className={`proj-card ${mapProjection === key ? 'active' : ''}`}
-              onClick={() => setMapProjection(key)}
-            >
-              <Globe size={14} className="proj-icon" />
-              <span className="proj-label">{label}</span>
-              <span className="proj-desc">{desc}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
       <section className="section">
         <div className="section-head"><span className="section-title">Basemap</span></div>
         <div className="basemap-grid">
@@ -186,7 +165,6 @@ function SettingsTab() {
         <p><strong>Ship Route Planner</strong> — v1</p>
         <p>
           Geodesic polyline routing with vessel-specific constraints and land avoidance on a 0.5° navigation grid.
-          Supports Mercator and WGS84 (Globe) views.
         </p>
         <p className="attribution">
           Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ·

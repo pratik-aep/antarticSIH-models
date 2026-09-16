@@ -38,11 +38,13 @@ export function PlannerProvider({ children }) {
   const [vesselType, setVesselType] = useState('cargo')
   const [draftMeters, setDraftMeters] = useState(10.5)
   const [iceClass, setIceClass] = useState('none')
-  const [mapProjection, setMapProjection] = useState('mercator')
+  // Kept as a fixed value: the coordinate transforms still take it, but the
+  // projection picker is gone because it never called setProjection - it only
+  // moved the camera.
+  const mapProjection = 'mercator'
 
   const [basemap, setBasemap] = useState('google-sat')
   const [showSeamarks, setShowSeamarks] = useState(false)
-  const [is3D, setIs3D] = useState(false)
   const [showWindFlow, setShowWindFlow] = useState(false)
   const [showEca, setShowEca] = useState(true)
   const [showChokepoints, setShowChokepoints] = useState(false)
@@ -236,10 +238,9 @@ export function PlannerProvider({ children }) {
     vesselType, setVesselType,
     draftMeters, setDraftMeters,
     iceClass, setIceClass,
-    mapProjection, setMapProjection,
+    mapProjection,
     basemap, setBasemap,
     showSeamarks, setShowSeamarks,
-    is3D, setIs3D,
     showWindFlow, setShowWindFlow,
     showEca, setShowEca,
     showChokepoints, setShowChokepoints,
@@ -260,7 +261,7 @@ export function PlannerProvider({ children }) {
     valid,
   }), [waypoints, setWaypoint, addWaypoint, removeWaypoint, moveWaypoint, speedKnots,
        departureTimeUTC, optimizeFor, vesselType, draftMeters, iceClass, mapProjection,
-       basemap, showSeamarks, is3D, showWindFlow,
+       basemap, showSeamarks, showWindFlow,
        showEca, showChokepoints, showChevrons, showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind,
        showWeatherHeatmap, showStorms, weatherSubFilters, toggleWeatherSubFilter, route, routeLoading, routeError, icebergs, routeWeather,
        sliderTimeISO, isPlaying, closestApproaches, shipWeatherAtSliderTime, valid])

@@ -13,10 +13,6 @@ const MAX_WAYPOINTS = 8
 const PIN_BLUE = '#1452c4'
 const PIN_WHITE = '#ffffff'
 
-// Camera tilt for the 3D view. Past ~60 deg the horizon enters frame and raster
-// tiles at the far edge stretch badly, so this stays just under it.
-const PITCH_3D = 55
-
 // Every selectable basemap layer. The seamark overlay is deliberately absent:
 // it draws on top of a basemap rather than being one.
 const BASEMAP_LAYER_IDS = [
@@ -194,8 +190,8 @@ export default function MapView() {
   const hoverPopupRef = useRef(null)
   const {
     waypoints, addWaypoint, route, routeLoading,
-    basemap, mapProjection, setMapProjection,
-    showSeamarks, is3D, setIs3D, showWindFlow,
+    basemap, mapProjection,
+    showSeamarks, showWindFlow,
     showEca, showChokepoints, showChevrons, showSeaIce, showIceRisk, polarClass, showOceanCurrents, showWind, showWeatherHeatmap, showStorms, weatherSubFilters,
     icebergs, routeWeather, shipWeatherAtSliderTime, closestApproaches, sliderTimeISO, departureTimeUTC,
   } = usePlanner()
@@ -240,7 +236,12 @@ export default function MapView() {
       map.getSource('chokepoints').setData(transformGeoJSON(rawChokepointsRef.current, mapProjection))
     }
     if (routeWeather && routeWeather.samples && map.getSource('storms-hazard')) {
-      const filteredSamples = routeWeather.samples.filter(s => {
+      // Every sample is rendered, not just the ones a sub-filter matches.
+      // A calm stretch is a forecast result, not missing data: dropping those
+      // points left holes in the track that read as gaps in coverage. The
+      // filters now set emphasis instead, so calm legs stay visible as small
+      // muted dots.
+      const matches = (s) => {
         if (!weatherSubFilters) return true
         if (weatherSubFilters.hazards && s.hasHazard) return true
         if (weatherSubFilters.storms && s.hasStorms) return true
@@ -248,12 +249,12 @@ export default function MapView() {
         if (weatherSubFilters.wind && s.hasWind) return true
         if (weatherSubFilters.waves && s.hasWaves) return true
         return false
-      })
-      const features = filteredSamples.map(s => {
+      }
+      const features = routeWeather.samples.map(s => {
         const [tLon, tLat] = transformCoord(s.lon, s.lat, mapProjection)
         return {
           type: 'Feature',
-          properties: { ...s },
+          properties: { ...s, emphasised: matches(s) },
           geometry: { type: 'Point', coordinates: [tLon, tLat] },
         }
       })
@@ -321,11 +322,9 @@ export default function MapView() {
     })
     mapRef.current = map
 
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'nautical' }), 'bottom-left')
     map.addControl(new maplibregl.AttributionControl({ compact: false }))
-    // The 2D/3D toggle owns tilt; rotation is enabled with it.
-    map.dragRotate.disable()
 
     map.on('load', () => {
       // A ref alone cannot tell the overlay the map exists, so publish it as
@@ -525,7 +524,7 @@ export default function MapView() {
         source: 'storms-hazard',
         filter: ['==', ['get', 'dataSource'], 'forecast'],
         paint: {
-          'circle-radius': 7,
+          'circle-radius': ['case', ['get', 'emphasised'], 7, 3.2],
           'circle-color': [
             'match',
             ['get', 'hazardLevel'],
@@ -533,9 +532,9 @@ export default function MapView() {
             'moderate', '#eab308',
             '#22c55e'
           ],
-          'circle-stroke-width': 2,
+          'circle-stroke-width': ['case', ['get', 'emphasised'], 2, 0.8],
           'circle-stroke-color': '#ffffff',
-          'circle-opacity': 0.9,
+          'circle-opacity': ['case', ['get', 'emphasised'], 0.9, 0.5],
         },
       })
       map.addLayer({
@@ -544,7 +543,7 @@ export default function MapView() {
         source: 'storms-hazard',
         filter: ['==', ['get', 'dataSource'], 'modeled_estimate'],
         paint: {
-          'circle-radius': 6,
+          'circle-radius': ['case', ['get', 'emphasised'], 6, 3],
           'circle-color': [
             'match',
             ['get', 'hazardLevel'],
@@ -552,9 +551,9 @@ export default function MapView() {
             'moderate', '#fde047',
             '#4ade80'
           ],
-          'circle-stroke-width': 1.5,
+          'circle-stroke-width': ['case', ['get', 'emphasised'], 1.5, 0.6],
           'circle-stroke-color': '#d97706',
-          'circle-opacity': 0.5,
+          'circle-opacity': ['case', ['get', 'emphasised'], 0.5, 0.3],
         },
       })
 
@@ -999,48 +998,6 @@ export default function MapView() {
     }
   }, [basemap, showSeamarks])
 
-  // ---- projection & polar view switcher ----
-  // Read through a ref so changing the projection keeps whatever tilt the user
-  // has chosen, instead of snapping the camera flat.
-  const is3DRef = useRef(is3D)
-  is3DRef.current = is3D
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map) return
-
-    const pitch = is3DRef.current ? PITCH_3D : 0
-    try {
-      if (mapProjection === 'wgs84') {
-        map.flyTo({ center: [0, 15], zoom: 1.6, pitch, duration: 1000 })
-      } else {
-        // mercator
-        map.flyTo({ center: [66, 12], zoom: 2.4, pitch, duration: 1000 })
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [mapProjection])
-
-  // ---- 2D / 3D camera ----
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map) return
-    try {
-      map.easeTo({
-        pitch: is3D ? PITCH_3D : 0,
-        bearing: is3D ? map.getBearing() : 0,
-        duration: 600,
-      })
-      // Drag-rotate is what makes a tilted view navigable; leaving it on in 2D
-      // lets the map be rotated into a state the flat view cannot express.
-      if (is3D) map.dragRotate.enable()
-      else map.dragRotate.disable()
-    } catch {
-      /* ignore */
-    }
-  }, [is3D])
-
   // ---- fit to route once computed (not on every keystroke) ----
   const fittedRef = useRef('')
 
@@ -1118,30 +1075,6 @@ export default function MapView() {
         </div>
       )}
 
-      <div className="map-projection-bar">
-        {[
-          ['mercator', 'Mercator'],
-          ['wgs84', 'WGS84'],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={`map-proj-btn ${mapProjection === key ? 'active' : ''}`}
-            onClick={() => setMapProjection(key)}
-          >
-            {label}
-          </button>
-        ))}
-        <span className="map-proj-sep" />
-        <button
-          type="button"
-          className={`map-proj-btn ${is3D ? 'active' : ''}`}
-          onClick={() => setIs3D(!is3D)}
-          title={is3D ? 'Switch to flat view' : 'Tilt the camera; drag to rotate'}
-        >
-          {is3D ? '3D' : '2D'}
-        </button>
-      </div>
 
       {routeLoading && <div className="routing-indicator"><span className="spinner" /> Routing…</div>}
     </div>

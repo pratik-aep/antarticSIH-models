@@ -93,6 +93,10 @@ export default function ModelStatusBar() {
             </div>
           )}
 
+          <a className="model-tests-link" href="/model-tests.html" target="_blank" rel="noreferrer">
+            Open model test dashboard →
+          </a>
+
           {!allLive && (
             <p className="model-status-hint">
               Layers shown for offline models are simulated. Start the backend with
