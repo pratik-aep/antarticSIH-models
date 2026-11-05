@@ -121,8 +121,9 @@ function SettingsTab() {
             ['google-hybrid', 'Imagery + labels', 'Hybrid'],
             ['google-streets', 'Google roads', 'Streets'],
             ['standard', 'OpenStreetMap', 'Standard'],
-            ['opentopo', 'OpenTopoMap relief', 'Topo'],
+            ['opentopo', 'OpenTopoMap globe', 'Topo'],
             ['light', 'CARTO light', 'Light'],
+            ['apple', 'Apple Maps look', 'Apple'],
           ].map(([key, desc, label]) => (
             <button key={key} className={`basemap-card ${basemap === key ? 'active' : ''}`} onClick={() => setBasemap(key)}>
               <span className="bm-preview"><span className={`bm-dot ${key}`} /></span>

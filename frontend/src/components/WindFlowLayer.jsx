@@ -291,6 +291,13 @@ export default function WindFlowLayer({ map, visible }) {
     // far too much to run on every frame of a drag. Streaks keep animating at
     // full rate; the colour field lags by at most a few frames, which is not
     // perceptible while the map is moving.
+    // On a globe, a pixel off the sphere unprojects to the nearest horizon point,
+    // so a round trip that lands elsewhere means there is no map under it.
+    const isOnMap = (px, py, ll) => {
+      const back = map.project(ll)
+      return Math.abs(back.x - px) < 1.5 && Math.abs(back.y - py) < 1.5
+    }
+
     let fieldDirty = true
     let sinceFieldDraw = 0
     const FIELD_FRAME_INTERVAL = 4
@@ -306,8 +313,8 @@ export default function WindFlowLayer({ map, visible }) {
           const px = (x / (sw - 1)) * width
           const py = (y / (sh - 1)) * height
           const ll = map.unproject([px, py])
-          const wind = sample(ll.lng, ll.lat)
           const i = (y * sw + x) * 4
+          const wind = isOnMap(px, py, ll) ? sample(ll.lng, ll.lat) : null
           if (!wind) { img.data[i + 3] = 0; continue }
           const kmh = Math.hypot(wind.u, wind.v) * 3.6
           const [r, g, b] = rampColor(kmh)
@@ -368,7 +375,7 @@ export default function WindFlowLayer({ map, visible }) {
         for (const p of particlesRef.current) {
           if (p.age > MAX_AGE_FRAMES) { seed(p); continue }
           const ll = map.unproject([p.x, p.y])
-          const wind = sample(ll.lng, ll.lat)
+          const wind = isOnMap(p.x, p.y, ll) ? sample(ll.lng, ll.lat) : null
           if (!wind) { seed(p); continue }
 
           // Advance in geographic space so streaks follow the real field, then

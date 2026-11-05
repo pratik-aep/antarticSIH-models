@@ -45,6 +45,21 @@ else
 fi
 export ICEBERG_MODEL_ROOT="$MODEL_ROOT"
 
+# macOS python.org builds ship without a wired-up CA bundle, so every
+# Open-Meteo fetch in weather_engine dies with CERTIFICATE_VERIFY_FAILED and
+# each sample silently degrades to a modeled estimate -- the route still
+# renders, so nothing looks broken. Point OpenSSL at certifi instead.
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  CA_BUNDLE="$("$PY" -c 'import certifi; print(certifi.where())' 2>/dev/null || true)"
+  if [ -n "$CA_BUNDLE" ] && [ -f "$CA_BUNDLE" ]; then
+    export SSL_CERT_FILE="$CA_BUNDLE"
+    export REQUESTS_CA_BUNDLE="$CA_BUNDLE"
+  else
+    echo "[backend] WARNING: no certifi CA bundle; live weather will fall back"
+    echo "[backend]          to modeled estimates. Fix: $PY -m pip install certifi"
+  fi
+fi
+
 # --- frontend deps ---------------------------------------------------------
 if [ ! -d frontend/node_modules ]; then
   echo "[frontend] installing npm dependencies"

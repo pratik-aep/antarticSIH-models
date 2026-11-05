@@ -7,6 +7,8 @@ import LayerControlPanel from './LayerControlPanel'
 import WindFlowLayer from './WindFlowLayer'
 import { unwrapLongitudes, splitIntoRenderedParts } from '../geo'
 import { getShipPositionAtTime, getIcebergPositionAtTime } from '../utils'
+import { APPLE_SOURCES, APPLE_LAYERS, appleImages } from '../appleBasemap'
+import { registerMap, unregisterMap } from '../tour/mapBus'
 
 const MAX_WAYPOINTS = 8
 
@@ -22,7 +24,18 @@ const BASEMAP_LAYER_IDS = [
   'basemap-standard',
   'basemap-opentopo',
   'basemap-light',
+  // The vector Apple look is many layers, all prefixed `basemap-apple-`.
+  ...APPLE_LAYERS.map(l => l.id),
 ]
+
+// Basemaps drawn on a globe when zoomed out; the rest stay flat.
+const GLOBE_BASEMAPS = ['apple', 'opentopo']
+// Space around the globe plus a soft atmosphere, faded out as you zoom in.
+const GLOBE_SKY = { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] }
+const DEFAULT_MAX_ZOOM = 22
+// OpenTopoMap only publishes tiles to z17; past that it serves blank tiles, so
+// the map would just stretch z17 into a blur.
+const BASEMAP_MAX_ZOOM = { opentopo: 17 }
 
 function basemapStyle() {
   return {
@@ -74,7 +87,8 @@ function basemapStyle() {
       },
       'basemap-opentopo': {
         type: 'raster',
-        tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png'],
+        // All three hosts: loading tiles in parallel keeps zooming from sitting on blurry parents.
+        tiles: ['a', 'b', 'c'].map(s => `https://${s}.tile.opentopomap.org/{z}/{x}/{y}.png`),
         tileSize: 256,
         attribution: '© OpenTopoMap contributors',
         maxzoom: 17,
@@ -93,8 +107,10 @@ function basemapStyle() {
         attribution: '© CARTO · © OpenStreetMap contributors',
         maxzoom: 20,
       },
+      ...APPLE_SOURCES,
     },
     layers: [
+      ...APPLE_LAYERS,
       { id: 'basemap-google-sat', type: 'raster', source: 'basemap-google-sat', layout: { visibility: 'visible' } },
       { id: 'basemap-standard', type: 'raster', source: 'basemap-standard', layout: { visibility: 'none' } },
       { id: 'basemap-opentopo', type: 'raster', source: 'basemap-opentopo', layout: { visibility: 'none' } },
@@ -330,7 +346,11 @@ export default function MapView() {
       // A ref alone cannot tell the overlay the map exists, so publish it as
       // state: the wind canvas needs the instance to project coordinates.
       setMapInstance(map)
-      map.addSource('route', { type: 'geojson', data: emptyFeatureCollection() })
+      // The demo tour drives this same camera, so hand it the instance too.
+      registerMap(map)
+      // lineMetrics lets the tour animate the route drawing itself on via
+      // line-progress; it only precomputes distances and is inert otherwise.
+      map.addSource('route', { type: 'geojson', data: emptyFeatureCollection(), lineMetrics: true })
       map.addLayer({
         id: 'route-outline',
         type: 'line',
@@ -458,6 +478,9 @@ export default function MapView() {
       }
       if (!map.hasImage('wind-arrow')) {
         map.addImage('wind-arrow', createArrowImageData('#a855f7', '#4c1d95'))
+      }
+      for (const { id, data, options } of appleImages()) {
+        if (!map.hasImage(id)) map.addImage(id, data, options)
       }
 
       map.addSource('ocean-currents', { type: 'geojson', data: emptyFeatureCollection() })
@@ -697,6 +720,7 @@ export default function MapView() {
       }
       map.remove()
       mapRef.current = null
+      unregisterMap()
     }
   }, [])
 
@@ -868,7 +892,8 @@ export default function MapView() {
           <div class="iceberg-label">${berg.name || berg.id} (${speed} kn ➔ ${Math.round(heading)}°)</div>
         `
         attachHoverListeners(el)
-        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        // opacityWhenCovered: fully hide bergs on the far side of the globe.
+        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom', opacityWhenCovered: '0' })
           .setLngLat([tLon, tLat])
           .addTo(map)
         icebergMarkersRef.current[berg.id] = marker
@@ -918,11 +943,28 @@ export default function MapView() {
           </svg>
         </div>
       `
-      shipMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
+      shipMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center', opacityWhenCovered: '0' })
         .setLngLat([tLon, tLat])
         .addTo(map)
     }
   }, [route, sliderTimeISO, departureTimeUTC, mapProjection])
+
+  // ---- hide markers that are not in view ----
+  // On a tilted map MapLibre still positions far-off markers, and one behind
+  // the camera lands mid-screen, so only show markers inside the visible bounds.
+  useEffect(() => {
+    const map = mapInstance
+    if (!map) return
+    const cull = () => {
+      const bounds = map.getBounds()
+      for (const marker of [...Object.values(icebergMarkersRef.current), shipMarkerRef.current]) {
+        if (marker) marker.getElement().style.visibility = bounds.contains(marker.getLngLat()) ? '' : 'hidden'
+      }
+    }
+    cull()
+    map.on('move', cull)
+    return () => map.off('move', cull)
+  }, [mapInstance, icebergs, route, sliderTimeISO])
 
   // ---- ECA + chokepoints + sea-ice + currents + wind data ----
   useEffect(() => {
@@ -988,7 +1030,9 @@ export default function MapView() {
     const target = `basemap-${basemap}`
     for (const id of BASEMAP_LAYER_IDS) {
       if (map.getLayer(id)) {
-        map.setLayoutProperty(id, 'visibility', id === target ? 'visible' : 'none')
+        // A basemap is either one raster layer or a group sharing its prefix.
+        const on = id === target || id.startsWith(`${target}-`)
+        map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none')
       }
     }
     // Seamarks are buoys, lights and depth contours drawn on transparent tiles,
@@ -996,6 +1040,10 @@ export default function MapView() {
     if (map.getLayer('overlay-seamarks')) {
       map.setLayoutProperty('overlay-seamarks', 'visibility', showSeamarks ? 'visible' : 'none')
     }
+    const globe = GLOBE_BASEMAPS.includes(basemap)
+    map.setProjection({ type: globe ? 'globe' : 'mercator' })
+    map.setSky(globe ? GLOBE_SKY : undefined)
+    map.setMaxZoom(BASEMAP_MAX_ZOOM[basemap] ?? DEFAULT_MAX_ZOOM)
   }, [basemap, showSeamarks])
 
   // ---- fit to route once computed (not on every keystroke) ----
@@ -1019,7 +1067,7 @@ export default function MapView() {
   }, [route])
 
   return (
-    <div className="map-wrap">
+    <div className={`map-wrap ${GLOBE_BASEMAPS.includes(basemap) ? 'globe-view' : ''}`}>
       <div ref={containerRef} className="map" />
       <WindFlowLayer map={mapInstance} visible={showWindFlow} />
 

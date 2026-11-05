@@ -1,0 +1,403 @@
+/* ---------------------------------------------------------------- tour
+ * Motion graphics for the demo tour.
+ *
+ * Two timing rules run through all of this:
+ *
+ * 1. Scene-length animations take their duration from `--scene-dur`, set from
+ *    the storyboard's `dur`. A caption fades in, holds, and fades out on one
+ *    keyframe timeline, so retiming a scene restyles its caption for free.
+ * 2. Entrances stagger off `--i`, the element's index. One rule animates any
+ *    number of words or cards without per-element CSS.
+ */
+
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Panels slide away for the title scenes so the map plays full-bleed. */
+.tour-chrome-hidden .panel {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+.tour-chrome-hidden .right-layer-bar,
+.tour-chrome-hidden .live-hud-card,
+.tour-chrome-hidden .maplibregl-ctrl {
+  opacity: 0;
+}
+
+.panel {
+  transition: opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
+              transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.right-layer-bar,
+.live-hud-card,
+.maplibregl-ctrl {
+  transition: opacity 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ------------------------------------------------------------- letterbox */
+.tour-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8.5vh;
+  background: #05090f;
+  transform: translateY(var(--hidden, -100%));
+  transition: transform 720ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 2;
+}
+
+.tour-bar.top    { top: 0; --hidden: -100%; }
+.tour-bar.bottom { bottom: 0; --hidden: 100%; }
+.tour-bar.on     { transform: translateY(0); }
+
+/* ------------------------------------------------------------- vignette */
+.tour-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 42%, rgba(4, 10, 22, 0.62) 100%);
+  opacity: 0;
+  transition: opacity 800ms ease;
+}
+
+.tour-vignette.on { opacity: 1; }
+
+/* ----------------------------------------------------- shared word rise */
+/* Words rise out from behind a mask rather than simply fading. The mask is
+ * padded and pulled back by the same amount so descenders are not clipped. */
+.tour-word-mask {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  padding-bottom: 0.14em;
+  margin-bottom: -0.14em;
+}
+
+.tour-word {
+  display: inline-block;
+  transform: translateY(115%);
+  animation: tourWordRise 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 52ms + var(--lead, 0ms));
+}
+
+@keyframes tourWordRise {
+  0%   { transform: translateY(115%) rotate(2.5deg); opacity: 0; }
+  100% { transform: translateY(0) rotate(0); opacity: 1; }
+}
+
+/* ----------------------------------------------------------- title card */
+.tour-title-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  z-index: 3;
+  animation: tourHold var(--scene-dur, 5000ms) both;
+}
+
+.tour-title {
+  margin: 0;
+  font-size: clamp(40px, 6vw, 84px);
+  font-weight: 800;
+  letter-spacing: -0.028em;
+  line-height: 1.02;
+  color: #fff;
+  text-shadow: 0 2px 40px rgba(4, 10, 22, 0.72), 0 1px 3px rgba(4, 10, 22, 0.6);
+}
+
+.tour-title-rule {
+  width: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #1452c4, #62a0ff);
+  box-shadow: 0 0 18px rgba(20, 82, 196, 0.85);
+  animation: tourRule var(--scene-dur, 5000ms) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.tour-subtitle {
+  margin: 0;
+  font-size: clamp(15px, 1.55vw, 22px);
+  font-weight: 500;
+  letter-spacing: 0.015em;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 22px rgba(4, 10, 22, 0.8);
+}
+
+@keyframes tourHold {
+  0%, 72% { opacity: 1; filter: blur(0); }
+  100%    { opacity: 0; transform: scale(1.012); filter: blur(2.2px); }
+}
+
+@keyframes tourRule {
+  0%, 12%  { width: 0; opacity: 0; }
+  16%      { opacity: 1; }
+  34%, 72% { width: 74px; opacity: 1; }
+  100%     { width: 74px; opacity: 0; }
+}
+
+/* ---------------------------------------------------------- lower third */
+.tour-lower-third {
+  position: absolute;
+  left: 404px;
+  bottom: 52px;
+  /* Shrinks before it can reach the HUD card at bottom-right (~580px of
+     reserved width). At the 1920px recording size this stays the full 620px. */
+  max-width: max(320px, min(620px, calc(100vw - 1000px)));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 11px;
+  z-index: 3;
+  animation: tourLowerOut var(--scene-dur, 5000ms) both;
+}
+
+/* The hold releases at 74% so each caption is clearly gone before the next
+ * scene's arrives, instead of crossing over it. The exit blur is deliberately
+ * slight — just enough to read as a soften, not as a defocus. */
+@keyframes tourLowerOut {
+  0%, 74% { opacity: 1; transform: translateY(0); filter: blur(0); }
+  100%    { opacity: 0; transform: translateY(-12px); filter: blur(1.8px); }
+}
+
+.tour-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1452c4, #2f6fe0);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: 0 6px 22px rgba(20, 82, 196, 0.5);
+  animation: tourKickerIn 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.tour-kicker::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8dd0ff;
+  box-shadow: 0 0 9px #8dd0ff;
+  animation: tourDot 1900ms ease-in-out infinite;
+}
+
+@keyframes tourKickerIn {
+  0%   { opacity: 0; transform: translateX(-22px) skewX(-8deg); }
+  100% { opacity: 1; transform: translateX(0) skewX(0); }
+}
+
+@keyframes tourDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.82); }
+}
+
+.tour-caption {
+  margin: 0;
+  padding: 14px 22px;
+  border-radius: 14px;
+  background: rgba(8, 17, 33, 0.8);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: clamp(18px, 1.8vw, 27px);
+  font-weight: 650;
+  line-height: 1.28;
+  letter-spacing: -0.008em;
+  box-shadow: 0 14px 48px rgba(4, 10, 22, 0.5);
+  animation: tourCaptionIn 660ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tourCaptionIn {
+  0%   { opacity: 0; transform: translateY(20px) scale(0.965); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ----------------------------------------------------------- stat cards */
+.tour-stats {
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 3;
+  animation: tourLowerOut var(--scene-dur, 5000ms) both;
+}
+
+.tour-stat {
+  min-width: 226px;
+  padding: 14px 18px 13px;
+  border-radius: 14px;
+  background: rgba(8, 17, 33, 0.82);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 44px rgba(4, 10, 22, 0.48);
+  animation: tourStatIn 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 110ms);
+}
+
+.tour-stat-value {
+  display: block;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.06;
+  letter-spacing: -0.03em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.tour-stat-label {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7fb0ff;
+}
+
+@keyframes tourStatIn {
+  0%   { opacity: 0; transform: translateX(46px) scale(0.93); filter: blur(6px); }
+  100% { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
+}
+
+/* ------------------------------------------------------------ spotlight */
+.tour-spotlight {
+  position: absolute;
+  border-radius: 13px;
+  border: 2px solid #2f6fe0;
+  box-shadow: 0 0 0 3px rgba(20, 82, 196, 0.2),
+              0 0 40px 8px rgba(20, 82, 196, 0.38);
+  z-index: 3;
+  animation: tourSpotIn 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: top 340ms cubic-bezier(0.22, 1, 0.36, 1),
+              left 340ms cubic-bezier(0.22, 1, 0.36, 1),
+              width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+              height 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tour-spotlight::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 13px;
+  border: 2px solid rgba(90, 160, 255, 0.6);
+  animation: tourSpotPulse 1900ms ease-out infinite;
+}
+
+.tour-spot-label {
+  position: absolute;
+  top: -13px;
+  left: 14px;
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1452c4, #2f6fe0);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(20, 82, 196, 0.55);
+}
+
+@keyframes tourSpotIn {
+  0%   { opacity: 0; transform: scale(1.07); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tourSpotPulse {
+  0%   { opacity: 0.9; transform: scale(1); }
+  70%  { opacity: 0; transform: scale(1.06); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+
+/* ------------------------------------------------- chapter progress bar */
+.tour-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 3px;
+  padding: 0 3px 3px;
+  z-index: 4;
+}
+
+.tour-progress-seg {
+  position: relative;
+  height: 3px;
+  flex: var(--w, 1);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.tour-progress-seg > i {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #1452c4, #62a0ff);
+  box-shadow: 0 0 12px rgba(60, 130, 255, 0.8);
+}
+
+/* ----------------------------------------------------------- idle prompt */
+.tour-launcher {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(8, 17, 33, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 26px rgba(4, 10, 22, 0.45);
+}
+
+.tour-launcher:hover { background: rgba(20, 82, 196, 0.95); }
+
+.tour-launcher kbd {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.16);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-word,
+  .tour-stat,
+  .tour-kicker,
+  .tour-caption,
+  .tour-spotlight::after {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+    animation-iteration-count: 1;
+  }
+}

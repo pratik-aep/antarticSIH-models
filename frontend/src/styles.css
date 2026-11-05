@@ -271,6 +271,8 @@ body {
   font: inherit; text-align: left;
 }
 .basemap-card.active { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(20,82,196,0.12); }
+/* The card left-aligns its children, which would shrink the preview to 0px wide. */
+.bm-preview { align-self: stretch; }
 .bm-preview .bm-dot { display: block; width: 100%; height: 44px; border-radius: 6px; }
 .bm-dot.standard { background: linear-gradient(135deg, #aad3df 40%, #e8eef0 40% 55%, #d7e7cf 55%); }
 .bm-dot.light { background: linear-gradient(135deg, #f1f4f7 40%, #ffffff 40% 55%, #eef1f4 55%); }
@@ -341,6 +343,8 @@ body {
 /* ---------------------------------------------------------------- map */
 .map-wrap { flex: 1; position: relative; min-width: 0; }
 .map { position: absolute; inset: 0; }
+/* Space behind the globe basemaps; the canvas is transparent around the sphere. */
+.map-wrap.globe-view .map { background: radial-gradient(circle at 50% 50%, #17233a 0%, #0a111f 55%, #03060c 100%); }
 
 .map-hint {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
@@ -748,8 +752,10 @@ body {
 .live-hud-card {
   position: absolute;
   bottom: 48px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Right-aligned rather than centred: centred, it sat directly under the
+     demo tour's lower-third captions. 48px of bottom clearance keeps it off
+     the MapLibre attribution control, which also lives bottom-right. */
+  right: 14px;
   background: rgba(15, 23, 42, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
@@ -990,6 +996,18 @@ body {
 }
 .bm-dot.opentopo {
   background: linear-gradient(135deg, #e8e0cd 35%, #d6c9a8 35% 62%, #bcd3b0 62%);
+}
+.bm-dot.apple {
+  background: radial-gradient(circle at 50% 50%, #8dd5f5 0 34%, transparent 35%), #0a111f;
+  position: relative;
+}
+.bm-dot.apple::after {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 44% 40%, #dfe8b1 0 9%, transparent 10%),
+    radial-gradient(circle at 56% 58%, #bedd9e 0 7%, transparent 8%);
+  border-radius: 6px;
 }
 
 
